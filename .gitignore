@@ -96,3 +96,9 @@ Desktop.ini
 # Arquitecturas anteriores
 /ARQUITECTURA_TMAD_DUAL_BOT_V4.md
 /ARQUITECTURA_TMAD_DUAL_BOT_V5_8.md
+data/
+ledger/
+out/
+swing_lab_runtime/
+__pycache__/
+*.pkl
