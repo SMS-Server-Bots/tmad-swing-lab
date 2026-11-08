@@ -1,0 +1,98 @@
+﻿# Secretos
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+*.pem
+*.key
+*.pfx
+*.p12
+credentials*.json
+secrets*.json
+service-account*.json
+
+# Estado local de TMAD
+02_CONFIG/
+03_DATOS/
+04_RUNTIME/
+runtime_observability/
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Bases, logs y runtime
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.log
+*.lock
+*.pid
+*.tmp
+*.bak
+
+# Paquetes y copias
+*.zip
+*.7z
+*.rar
+
+# Editores y Windows
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+
+# ============================================================
+# TMAD · HISTÓRICO NO NECESARIO EN GITHUB
+# ============================================================
+
+# Validadores históricos: conservar v6.1.9 y los validadores estables current
+/01_PROGRAMAS/validar_*.py
+!/01_PROGRAMAS/validar_*_v6_1_9.py
+!/01_PROGRAMAS/validar_routing_current.py
+
+# Documentos históricos dentro de 01_PROGRAMAS
+/01_PROGRAMAS/CAMBIOS_*.txt
+/01_PROGRAMAS/RESULTADO_VALIDACION_*.txt
+/01_PROGRAMAS/VALIDACION_*.txt
+/01_PROGRAMAS/LEEME_*.txt
+/01_PROGRAMAS/ARQUITECTURA_*.md
+
+# Validadores raíz: conservar v6.1.9 y el validador estable current
+/VALIDAR_TMAD_V*.bat
+!/VALIDAR_TMAD_V6_1_9.bat
+!/VALIDAR_TMAD_CURRENT.bat
+
+# Documentación raíz: conservar v6.1.9
+/CAMBIOS_V*.txt
+!/CAMBIOS_V6_1_9.txt
+
+/EJEMPLOS_DISCORD_V*.md
+!/EJEMPLOS_DISCORD_V6_1_9.md
+
+/ORDEN_CANALES_DISCORD_V*.md
+!/ORDEN_CANALES_DISCORD_V6_1_9.md
+
+/PACKAGE_MANIFEST_V*.txt
+!/PACKAGE_MANIFEST_V6_1_9.txt
+
+/RESULTADO_VALIDACION_V*.txt
+!/RESULTADO_VALIDACION_V6_1_9.txt
+
+/VALIDACION_TECNICA*.txt
+
+# Arquitecturas anteriores
+/ARQUITECTURA_TMAD_DUAL_BOT_V4.md
+/ARQUITECTURA_TMAD_DUAL_BOT_V5_8.md

@@ -1,0 +1,13 @@
+TMAD Dual Bot v6.1.9
+
+1. Detén ambos bots.
+2. Copia el contenido de este paquete directamente sobre TMAD_Dual_Bot_OneClick.
+3. Sustituye archivos existentes.
+4. No borres 02_CONFIG, 03_DATOS ni 04_RUNTIME.
+5. Ejecuta VALIDAR_TMAD_V6_1_7.bat.
+6. Inicia con INICIAR_TMAD_DUAL_BOT.bat.
+
+Discord:
+- Research = candidatos EARLY/WATCH/READY/RETEST/CAPPED.
+- Live = solo ENTER/UPDATE/CLOSE.
+- Un estado ERROR bloquea ambos hasta recuperación explícita.

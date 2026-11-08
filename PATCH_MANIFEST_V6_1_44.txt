@@ -1,0 +1,22 @@
+TMAD v6.1.44 patch manifest
+
+Changed files:
+- VERSION.txt
+- CAMBIOS_V6_1_44.txt
+- PATCH_MANIFEST_V6_1_44.txt
+- VALIDAR_TMAD_CURRENT.bat
+- INSTALAR_SYNC_RUNTIME_LOGS_TMAD.ps1
+- 01_PROGRAMAS/observability/runtime_publication_watchdog.ps1
+- 01_PROGRAMAS/observability/README_V6_1_44.md
+- 01_PROGRAMAS/validation_support/validar_v6_1_44.py
+- 01_PROGRAMAS/data_bot/config.py (version sync)
+- 01_PROGRAMAS/alerts_bot/config.py (version sync)
+
+Operational behavior:
+- event watcher remains primary runtime-logs publisher
+- hourly snapshot remains fallback
+- independent watchdog runs every 30 minutes
+- watchdog repairs only when local production is newer and remote publication is stale >3h
+- deployment performs immediate convergence check/repair
+
+No Scanner, SELECTIVE, CORE, GEX, Timing, FUSION, trading threshold, sizing, stop or TP logic changes.

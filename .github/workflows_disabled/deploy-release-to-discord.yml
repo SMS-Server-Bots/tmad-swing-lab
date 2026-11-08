@@ -1,0 +1,111 @@
+name: Deploy validated TMAD release
+
+on:
+  workflow_run:
+    workflows: ["Sync TMAD version"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: tmad-discord-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event == 'push') }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout final main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Resolve release or control-only change
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags --force --prune
+          git reset --hard origin/main
+
+          VERSION="$(tr -d '[:space:]' < VERSION.txt)"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid VERSION.txt: $VERSION"
+            exit 1
+          fi
+
+          TAG="v$VERSION"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+          if ! git show-ref --tags --verify --quiet "refs/tags/$TAG"; then
+            echo "::error::Missing release tag $TAG"
+            exit 1
+          fi
+
+          TAG_SHA="$(git rev-list -n 1 "$TAG")"
+          if [[ "$TAG_SHA" == "$HEAD_SHA" ]]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            echo "Exact release resolved: $TAG -> $HEAD_SHA"
+            exit 0
+          fi
+
+          set +e
+          python .github/scripts/classify_release_impact.py "$TAG_SHA" "$HEAD_SHA"
+          RUNTIME_CHANGED=$?
+          set -e
+
+          if [[ "$RUNTIME_CHANGED" -ne 0 ]]; then
+            echo "::error::Tag/HEAD mismatch contains runtime changes: $TAG -> $TAG_SHA, main -> $HEAD_SHA"
+            exit 1
+          fi
+
+          echo "deploy=false" >> "$GITHUB_OUTPUT"
+          echo "Control-plane/validation-only change after $TAG; no Discord update will be sent."
+
+      - name: Send %update to Discord
+        if: steps.release.outputs.deploy == 'true'
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_COMMANDS_WEBHOOK }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${DISCORD_WEBHOOK:-}" ]]; then
+            echo "::error::Missing repository secret DISCORD_COMMANDS_WEBHOOK"
+            exit 1
+          fi
+
+          HTTP_CODE="$(curl --silent --show-error --output /tmp/discord_response.txt --write-out "%{http_code}" \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --data '{"content":"%update"}' \
+            "$DISCORD_WEBHOOK")"
+
+          if [[ "$HTTP_CODE" != "204" && "$HTTP_CODE" != "200" ]]; then
+            echo "Discord webhook failed with HTTP $HTTP_CODE"
+            cat /tmp/discord_response.txt
+            exit 1
+          fi
+
+          echo "%update sent successfully"
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "## TMAD release gate" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: ${{ steps.release.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tag: ${{ steps.release.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Main SHA: ${{ steps.release.outputs.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ steps.release.outputs.deploy }}" == "true" ]]; then
+            echo '- Result: validated runtime release; Discord %update sent' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- Result: control-plane/validation-only change; no Discord %update sent' >> "$GITHUB_STEP_SUMMARY"
+          fi

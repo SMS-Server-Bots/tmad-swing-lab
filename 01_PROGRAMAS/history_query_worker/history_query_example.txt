@@ -1,0 +1,18 @@
+# TMAD History Query Worker - non-secret configuration
+TMAD_HISTORY_BIND_HOST=127.0.0.1
+TMAD_HISTORY_BIND_PORT=8787
+TMAD_HISTORY_MANIFEST_KEY=manifests/data_bot_archive/latest.json
+TMAD_HISTORY_MANIFEST_TTL_SECONDS=300
+TMAD_HISTORY_CACHE_TTL_HOURS=24
+TMAD_HISTORY_CACHE_MAX_GB=8
+TMAD_HISTORY_QUERY_TIMEOUT_SECONDS=20
+TMAD_HISTORY_MAX_SQL_ROWS=1000
+TMAD_HISTORY_MAX_CSV_ROWS=5000
+TMAD_HISTORY_MAX_TEXT_LINES=1000
+TMAD_HISTORY_MAX_BLOB_BYTES=1048576
+
+# Optional outbound HTTPS bridge for remote analytical access.
+# cloudflared keeps port 8787 bound only to localhost; no inbound firewall rule is required.
+TMAD_HISTORY_TUNNEL_ENABLED=1
+TMAD_HISTORY_CLOUDFLARED_EXE=C:\Tools\cloudflared\cloudflared.exe
+TMAD_HISTORY_REGISTER_URL=https://dzkbljrwvcbknozolrgw.supabase.co/functions/v1/tmad-history-worker-register

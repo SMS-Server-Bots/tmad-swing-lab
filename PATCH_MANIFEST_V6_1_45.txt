@@ -1,0 +1,21 @@
+TMAD v6.1.45 patch manifest
+
+Changed files for the final release:
+- VERSION.txt
+- CAMBIOS_V6_1_45.txt
+- PATCH_MANIFEST_V6_1_45.txt
+- VALIDAR_TMAD_CURRENT.bat
+- INSTALAR_SYNC_RUNTIME_LOGS_TMAD.ps1
+- .github/workflows/sync-tmad-version.yml
+- 01_PROGRAMAS/observability/runtime_publication_watchdog.ps1
+- 01_PROGRAMAS/validation_support/validar_v6_1_45.py
+- version markers synchronized automatically by workflow
+
+Operational behavior:
+- event watcher = primary publication path
+- hourly snapshot = fallback path
+- independent watchdog = third repair path every 30 minutes
+- stale threshold = 3 hours with local production newer than remote branch
+- deployment performs immediate convergence check before bot restart
+
+No trading logic or Scanner parameter changes.

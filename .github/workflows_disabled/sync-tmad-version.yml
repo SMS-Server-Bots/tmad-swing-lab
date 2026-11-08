@@ -1,0 +1,141 @@
+name: Sync TMAD version
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  contents: write
+
+# Historical source migrations are intentionally NOT replayed on every release.
+# References retained for validator/audit continuity: apply_v6_1_43_patch.py, apply_v6_1_48_patch.py.
+
+jobs:
+  sync-version:
+    if: github.event_name == 'schedule' || github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install validation dependencies
+        shell: bash
+        run: python -m pip install --disable-pip-version-check -q -r 01_PROGRAMAS/alerts_bot/requirements.txt
+
+      - name: Synchronize version markers
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          version = Path('VERSION.txt').read_text(encoding='utf-8').strip()
+          if not re.fullmatch(r'\d+\.\d+\.\d+', version):
+              raise SystemExit(f'Invalid VERSION.txt: {version!r}')
+
+          replacements = {
+              '01_PROGRAMAS/alerts_bot/config.py': [
+                  (r'(?m)^BOT_VERSION\s*=\s*["\'][^"\']+["\']\s*$', f'BOT_VERSION = "{version}"'),
+              ],
+              '01_PROGRAMAS/data_bot/config.py': [
+                  (r'(?m)^BOT_VERSION\s*=\s*["\'][^"\']+["\']\s*$', f'BOT_VERSION = "{version}"'),
+              ],
+              '01_PROGRAMAS/alerts_bot/maintenance_v620.py': [
+                  (r'(?m)^VERSION\s*=\s*["\'][^"\']+["\']\s*$', f'VERSION = "{version}"'),
+              ],
+              '01_PROGRAMAS/data_bot/maintenance_v620.py': [
+                  (r'(?m)^VERSION\s*=\s*["\'][^"\']+["\']\s*$', f"VERSION='{version}'"),
+              ],
+              '01_PROGRAMAS/data_bot/gex_negative_cache.py': [
+                  (r'(?m)^VERSION\s*=\s*["\'][^"\']+["\']+["\']?\s*$', f'VERSION = "{version}"'),
+              ],
+              '01_PROGRAMAS/alerts_bot/start-bot.ps1': [
+                  (r'TMAD Alerts Adaptive Bot v\d+\.\d+\.\d+', f'TMAD Alerts Adaptive Bot v{version}'),
+              ],
+              '01_PROGRAMAS/data_bot/start-bot.ps1': [
+                  (r'TMAD Core Data Bot v\d+\.\d+\.\d+', f'TMAD Core Data Bot v{version}'),
+              ],
+          }
+
+          for file_name, rules in replacements.items():
+              path = Path(file_name)
+              raw = path.read_bytes()
+              had_bom = raw.startswith(b'\xef\xbb\xbf')
+              text = raw.decode('utf-8-sig')
+              original = text
+              for pattern, replacement in rules:
+                  text, count = re.subn(pattern, replacement, text)
+                  if count != 1:
+                      raise SystemExit(f'{file_name}: expected exactly one match for {pattern!r}, got {count}')
+              if text != original:
+                  path.write_text(text, encoding='utf-8-sig' if had_bom else 'utf-8', newline='')
+                  print(f'updated {file_name} -> {version}')
+
+      - name: Validate synchronized source
+        shell: bash
+        run: bash .github/scripts/validate-tmad.sh
+
+      - name: Commit synchronized markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            01_PROGRAMAS/alerts_bot/config.py
+            01_PROGRAMAS/data_bot/config.py
+            01_PROGRAMAS/alerts_bot/maintenance_v620.py
+            01_PROGRAMAS/data_bot/maintenance_v620.py
+            01_PROGRAMAS/data_bot/gex_negative_cache.py
+            01_PROGRAMAS/alerts_bot/start-bot.ps1
+            01_PROGRAMAS/data_bot/start-bot.ps1
+          )
+          if git diff --quiet -- "${files[@]}"; then
+            echo "Version markers already synchronized."
+          else
+            git config user.name "SMS-Server-Bots"
+            git config user.email "285207566+SMS-Server-Bots@users.noreply.github.com"
+            git add -- "${files[@]}"
+            git commit -m "Sync TMAD version markers"
+            git push origin HEAD:main
+          fi
+
+      - name: Create exact version tag only for a real release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n' < VERSION.txt)"
+          tag="v${version}"
+          git fetch origin main --tags --force --prune
+          git reset --hard origin/main
+          head="$(git rev-parse HEAD)"
+
+          if git show-ref --tags --verify --quiet "refs/tags/${tag}"; then
+            tagged="$(git rev-list -n1 "${tag}")"
+            if [[ "${tagged}" == "${head}" ]]; then
+              echo "${tag} already points exactly to ${head}"
+              exit 0
+            fi
+
+            set +e
+            python .github/scripts/classify_release_impact.py "${tagged}" "${head}"
+            runtime_changed=$?
+            set -e
+
+            if [[ "${runtime_changed}" -ne 0 ]]; then
+              echo "::error::Runtime/source changed after ${tag} but VERSION.txt is still ${version}. Bump VERSION.txt in the PR before merge."
+              exit 1
+            fi
+
+            echo "Control-plane/validation-only change since ${tag}; keeping existing release tag and skipping deployment."
+            exit 0
+          fi
+
+          git tag "${tag}"
+          git push origin "refs/tags/${tag}"
+          echo "Created ${tag} -> ${head}"
+          test "$(git rev-list -n1 "${tag}")" = "${head}"

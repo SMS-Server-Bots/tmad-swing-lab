@@ -1,0 +1,11 @@
+TMAD DUAL BOT v4.4 - MAPA DE CARPETAS
+
+01_PROGRAMAS  = CODIGO. Se puede sustituir completo en una actualizacion.
+02_CONFIG     = CONFIGURACION Y SESION. NO borrar ni sobrescribir.
+03_DATOS      = DB live, ZIP semanales, logs, outputs y performance. NO borrar.
+04_RUNTIME    = Entornos virtuales, locks, marcadores y backups. Normalmente conservar.
+
+Regla para futuras versiones:
+- Sustituir solo 01_PROGRAMAS y los .bat de la raiz.
+- Nunca machacar 02_CONFIG ni 03_DATOS.
+- El actualizador crea backup de 01_PROGRAMAS en 04_RUNTIME\backups.

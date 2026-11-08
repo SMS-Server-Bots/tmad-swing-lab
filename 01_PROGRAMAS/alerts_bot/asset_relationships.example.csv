@@ -1,0 +1,5 @@
+ticker,related_ticker,relation_type,base_weight,polarity,note
+NVDA,SMH,ticker_etf,0.95,1,Semiconductors
+NVDA,QQQ,ticker_market,0.75,1,Nasdaq exposure
+MSTR,IBIT,ticker_etf,0.95,1,Bitcoin proxy
+SQQQ,QQQ,inverse_etf,1.00,-1,Inverse daily exposure

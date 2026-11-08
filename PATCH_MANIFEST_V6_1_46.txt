@@ -1,0 +1,17 @@
+TMAD v6.1.46 patch manifest
+
+Changed files:
+- VERSION.txt
+- CAMBIOS_V6_1_46.txt
+- PATCH_MANIFEST_V6_1_46.txt
+- 01_PROGRAMAS/observability/runtime_publication_watchdog.ps1
+- 01_PROGRAMAS/validation_support/validar_v6_1_46.py
+- INSTALAR_SYNC_RUNTIME_LOGS_TMAD.ps1
+- VALIDAR_TMAD_CURRENT.bat
+
+Purpose:
+- Fix false stale detections during watchdog convergence.
+- Prevent observability failure from blocking %update.
+- Keep independent 30-minute auto-repair active.
+
+No trading logic changes.
