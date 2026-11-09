@@ -102,3 +102,5 @@ out/
 swing_lab_runtime/
 __pycache__/
 *.pkl
+ops/logs/
+ops/diagnostico_datos_*.txt

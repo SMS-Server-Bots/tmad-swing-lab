@@ -12,6 +12,11 @@ param(
     [switch]$NoUpload
 )
 $ErrorActionPreference = "Stop"
+$logDir = Join-Path $PSScriptRoot "logs"; New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+Start-Transcript -Path (Join-Path $logDir ("alerts_stream_backup_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmm"))) | Out-Null
+Get-ChildItem $logDir -Filter "alerts_stream_backup_*.log" | Sort-Object LastWriteTime -Descending | Select-Object -Skip 30 | Remove-Item -Force -ErrorAction SilentlyContinue
+# Restos de ejecuciones anteriores interrumpidas
+Get-ChildItem $WorkDir -Directory -Filter "tmad_alerts_stream_*" -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddHours(-6) } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 $db = Join-Path $ProductionPath "03_DATOS\alerts_bot\db\live\tmad_alerts_adaptive.db"
 $helper = Join-Path $PSScriptRoot "tmad_sqlite_stream_backup.py"
 if (-not (Test-Path $db)) { throw "No existe $db" }
@@ -30,8 +35,10 @@ New-Item -ItemType Directory -Force -Path $out | Out-Null
 try {
     $t0 = Get-Date
     $stem = "tmad_alerts_adaptive_{0}" -f (Get-Date -Format "yyyyMMdd_HHmm")
-    & $py $helper dump $db $out --part-mb $PartMB --stem $stem
-    if ($LASTEXITCODE -ne 0) { throw "dump fallo ($LASTEXITCODE)" }
+    $prev = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+    & $py $helper dump $db $out --part-mb $PartMB --stem $stem 2>&1 | ForEach-Object { "$_" }
+    $code = $LASTEXITCODE; $ErrorActionPreference = $prev
+    if ($code -ne 0) { throw "dump fallo ($code)" }
     & $py $helper verify $out
     if ($LASTEXITCODE -ne 0) { throw "verify fallo ($LASTEXITCODE)" }
     $files = Get-ChildItem $out -File | Sort-Object Name
@@ -59,4 +66,5 @@ try {
     Write-Host "BACKUP_ALERTS_STREAM_OK release=$ReleaseTag partes=$($man.parts.Count)"
 } finally {
     if (-not $NoUpload) { Remove-Item -LiteralPath $out -Recurse -Force -ErrorAction SilentlyContinue }
+    Stop-Transcript | Out-Null
 }
