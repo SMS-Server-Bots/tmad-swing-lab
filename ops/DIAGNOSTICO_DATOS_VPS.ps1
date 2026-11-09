@@ -1,9 +1,9 @@
 # TMAD - Diagnostico de datos y backups en el VPS. SOLO LECTURA: no modifica, borra ni para nada.
-# Uso:  powershell -ExecutionPolicy Bypass -File DIAGNOSTICO_DATOS_VPS.ps1 -ProductionPath "C:\...\TMAD"
+# Uso:  powershell -ExecutionPolicy Bypass -File DIAGNOSTICO_DATOS_VPS.ps1   (rutas por defecto del VPS)
 # Genera diagnostico_datos_<fecha>.txt junto al script. Pega su contenido en el chat o subelo al repo.
 param(
-    [Parameter(Mandatory = $true)][string]$ProductionPath,
-    [string]$RepoPath = $ProductionPath
+    [string]$ProductionPath = 'C:\Users\Administrator\Desktop\TMAD_Dual_Bot_OneClick',
+    [string]$RepoPath = 'C:\Users\Administrator\Desktop\TMAD_Dual_Bot_OneClick_2'
 )
 $ErrorActionPreference = "Continue"
 $out = Join-Path $PSScriptRoot ("diagnostico_datos_{0}.txt" -f (Get-Date -Format "yyyyMMdd_HHmm"))

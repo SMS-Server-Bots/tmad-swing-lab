@@ -21,7 +21,7 @@
 
 ```powershell
 cd <ruta de este repo>\ops
-powershell -ExecutionPolicy Bypass -File .\DIAGNOSTICO_DATOS_VPS.ps1 -ProductionPath "C:\...\TMAD"
+powershell -ExecutionPolicy Bypass -File .\DIAGNOSTICO_DATOS_VPS.ps1
 ```
 
 Genera `diagnostico_datos_<fecha>.txt` con el espacio por disco, el tamaño de cada carpeta y de cada base/WAL, los ZIP locales, el estado de las tareas programadas y el log del backup. Pega el resultado en el chat. Con eso confirmo la causa y dimensiono el resto.
@@ -30,9 +30,9 @@ Genera `diagnostico_datos_<fecha>.txt` con el espacio por disco, el tamaño de c
 
 ```powershell
 # prueba local sin subir (comprueba espacio, tiempo y tamaño comprimido)
-powershell -ExecutionPolicy Bypass -File .\BACKUP_ALERTS_DB_STREAM.ps1 -ProductionPath "C:\...\TMAD" -NoUpload
+powershell -ExecutionPolicy Bypass -File .\BACKUP_ALERTS_DB_STREAM.ps1 -NoUpload
 # real: sube a la release tmad-alerts-db-latest y verifica en remoto
-powershell -ExecutionPolicy Bypass -File .\BACKUP_ALERTS_DB_STREAM.ps1 -ProductionPath "C:\...\TMAD"
+powershell -ExecutionPolicy Bypass -File .\BACKUP_ALERTS_DB_STREAM.ps1
 ```
 
 - Lee la base en solo lectura, dentro de una transacción de lectura: obtiene una instantánea coherente aunque el bot siga escribiendo.

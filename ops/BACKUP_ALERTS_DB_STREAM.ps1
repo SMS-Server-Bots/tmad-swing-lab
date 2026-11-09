@@ -2,9 +2,9 @@
 # Vuelca en streaming (solo lectura, instantanea coherente) a gzip por partes, verifica los SHA y sube
 # a la release "tmad-alerts-db-latest" de tmad-dual-bot. Despues descarga una parte y comprueba su SHA.
 # Espacio necesario: solo la salida comprimida (aprox. 10-20 % de la base).
-# Uso:  powershell -ExecutionPolicy Bypass -File BACKUP_ALERTS_DB_STREAM.ps1 -ProductionPath "C:\...\TMAD" [-WorkDir D:\tmp]
+# Uso:  powershell -ExecutionPolicy Bypass -File BACKUP_ALERTS_DB_STREAM.ps1 [-NoUpload] [-WorkDir D:\tmp]
 param(
-    [Parameter(Mandatory = $true)][string]$ProductionPath,
+    [string]$ProductionPath = 'C:\Users\Administrator\Desktop\TMAD_Dual_Bot_OneClick',
     [string]$WorkDir = $env:TEMP,
     [string]$GitHubRepo = "SMS-Server-Bots/tmad-dual-bot",
     [string]$ReleaseTag = "tmad-alerts-db-latest",
