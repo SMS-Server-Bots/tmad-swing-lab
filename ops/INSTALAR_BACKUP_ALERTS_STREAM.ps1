@@ -9,8 +9,8 @@ param(
 $ErrorActionPreference = "Stop"
 $script = Join-Path $PSScriptRoot "BACKUP_ALERTS_DB_STREAM.ps1"
 if (-not (Test-Path $script)) { throw "Falta $script" }
-$args = "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`""
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $args -WorkingDirectory $PSScriptRoot
+$taskArgs = "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`""
+$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $taskArgs -WorkingDirectory $PSScriptRoot
 $trigger = New-ScheduledTaskTrigger -Daily -At $At
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 3)
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -Force | Out-Null
