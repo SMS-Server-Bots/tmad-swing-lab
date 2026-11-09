@@ -64,13 +64,29 @@ def dump(db: str, out: str, part_mb: int = 1800, stem: str | None = None) -> dic
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=120)
     con.execute("PRAGMA busy_timeout=120000")
     con.execute("BEGIN")                     # instantánea de lectura coherente durante todo el volcado
+    import time
+    t0 = time.time()
+    def log(msg):
+        print(f"[{time.time()-t0:7.0f}s] {msg}", file=sys.stderr, flush=True)
+    log(f"python {sys.version.split()[0]} sqlite {sqlite3.sqlite_version} base {os.path.getsize(db)/1e9:.2f} GB")
     tables = [r[0] for r in con.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%'")]
-    counts = {t: con.execute(f'select count(*) from "{t}"').fetchone()[0] for t in tables}
+    counts = {}
+    for t in tables:
+        counts[t] = con.execute(f'select count(*) from "{t}"').fetchone()[0]
+    log(f"{len(tables)} tablas, {sum(counts.values()):,} filas; mayores: " +
+        ", ".join(f"{t}={n:,}" for t, n in sorted(counts.items(), key=lambda x: -x[1])[:5]))
     started = dt.datetime.now(dt.timezone.utc)
     pw = _PartWriter(out, stem, part_mb * 1024 * 1024)
+    last = time.time(); n = 0; cur_table = ""
     with gzip.GzipFile(fileobj=pw, mode="wb", compresslevel=6, mtime=0) as gz:
         for line in con.iterdump():
-            gz.write((line + "\n").encode("utf-8"))
+            gz.write((line + "\n").encode("utf-8")); n += 1
+            if line.startswith("CREATE TABLE"):
+                import re as _re; m = _re.match(r'CREATE TABLE\s+(?:IF NOT EXISTS\s+)?["\[`]?([^"\]`\s(]+)', line); cur_table = m.group(1) if m else line[:40]
+                log(f"tabla {cur_table} ({counts.get(cur_table, '?'):,} filas)" if isinstance(counts.get(cur_table), int) else f"tabla {cur_table}")
+            if time.time() - last > 30:
+                last = time.time()
+                log(f"  {n:,} sentencias | {cur_table} | comprimido {sum(p.get('bytes', 0) for p in pw.parts[:-1]) + pw.written:,} bytes")
     pw.close(); con.rollback(); con.close()
     manifest = dict(schema=1, source=os.path.abspath(db), source_bytes=os.path.getsize(db),
                     started_utc=started.isoformat(timespec="seconds"),
