@@ -30,7 +30,7 @@ NYSE_HOLIDAYS_2026 = {
 NUMERIC = [
     "current_price", "change_percent", "total_gex", "gex_change", "gamma_flip", "rsi14", "rvol",
     "momentum_score", "iv_z_spread", "iv_change", "otm_call_volume_z", "otm_put_volume_z", "pc_ratio",
-    "long_score", "put_wall_pct", "call_wall_pct", "wall_range_pct",
+    "long_score", "put_wall_pct", "call_wall_pct", "wall_range_pct", "call_wall", "put_wall",
 ]
 
 

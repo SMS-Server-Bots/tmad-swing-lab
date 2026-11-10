@@ -24,6 +24,7 @@ import pandas as pd
 from . import data as D
 from . import policy as P
 from .features import add_features, universe
+from . import movers_gap as MG
 
 LEDGER = "ledger"
 OUT = "out"
@@ -188,7 +189,8 @@ def main():
             p = make_picks(feats, d, mode)
             n = append_ledger(p)
             if a.cmd == "list":
-                open(os.path.join(OUT, f"eod_list_{d}.md"), "w").write(list_markdown(p, d))
+                md = list_markdown(p, d) + "\n\n" + MG.movers_markdown(MG.movers_list(feats, d), d)
+                open(os.path.join(OUT, f"eod_list_{d}.md"), "w", encoding="utf-8").write(md)
                 print(f"{d}: {n} selecciones nuevas ({mode}) -> {OUT}/eod_list_{d}.md")
         if a.cmd == "backfill":
             print(f"backfill {len(todo)} sesiones")
@@ -196,8 +198,13 @@ def main():
         pk = pd.read_csv(os.path.join(LEDGER, "picks.csv"))
         pos = simulate(pk, px)
         pos.to_csv(os.path.join(LEDGER, "positions.csv"), index=False)
-        sb = scoreboard(pos, universe_returns(feats, px))
-        open(os.path.join(OUT, "scoreboard.md"), "w").write(sb)
+        gt = MG.gap_trades(feats, px)
+        os.makedirs(LEDGER, exist_ok=True); gt.to_csv(os.path.join(LEDGER, "gap_trades.csv"), index=False)
+        last = gt[gt.date == gt.date.max()] if len(gt) else gt
+        sb = scoreboard(pos, universe_returns(feats, px)) + "\n\n" + MG.gap_scoreboard(gt)
+        if len(last):
+            sb += f"\n\nÚltima sesión con señal de hueco ({last.date.iloc[0]}): " + ", ".join(f"{t} (hueco {g*100:+.1f} %, {z:.1f} vol., resultado {rr*100:+.2f} %)" for t, g, z, rr in zip(last.ticker, last.gap, last.gap_z, last.ret_net))
+        open(os.path.join(OUT, "scoreboard.md"), "w", encoding="utf-8").write(sb)
         print(sb)
 
 

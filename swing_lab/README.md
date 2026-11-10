@@ -23,6 +23,20 @@ python -m swing_lab.run track --data-root C:\TMAD\03_DATOS
 
 o, de forma equivalente, `EJECUTAR_SWING_LAB_VPS.ps1 -DataRoot C:\TMAD\03_DATOS`.
 
+## En el VPS (programado)
+
+```powershell
+cd C:\Users\Administrator\Desktop\tmad-swing-lab\swing_lab
+powershell -ExecutionPolicy Bypass -File .\INSTALAR_SWING_LAB_VPS.ps1 -RunNow
+```
+Cada día laborable, a las 14:30 hora del VPS (23:30 en Madrid), deja `swing_lab_runtime\ULTIMA_LISTA.md` y `swing_lab_runtime\MARCADOR.md`.
+
+## Qué produce cada día
+
+- **Políticas en papel** (`PAPER_V1_REV`, `C5050`, `RANDOM`): Top-5 LONG y SHORT con seguimiento y salida.
+- **MOVERS_V1**: las 20 acciones con más recorrido esperado mañana, con su P80 como referencia de stop. No da dirección.
+- **GAP_FADE_V1**: a las 09:35, corto en acciones con hueco al alza de más de 3 volatilidades, cerrando al final del día. Se evalúa en papel cada día.
+
 ## Salidas
 
 - `out/eod_list_<fecha>.md`: lista LONG y SHORT de la política candidata, con el stop orientativo.

@@ -1,0 +1,12 @@
+{
+ "version": "MOVERS_V1",
+ "model": "log(|ret_c2c_1d|+0.002) = a + b*log(vol10_pct)",
+ "a": -4.547299454080679,
+ "b": 0.5057320392564836,
+ "p80_multiplier": 2.316,
+ "fit_dates": [
+  "2026-07-31",
+  "2026-10-30"
+ ],
+ "note": "GEX/RVOL add ~0.6% R2 out of sample over volatility alone; not used"
+}
