@@ -1,0 +1,71 @@
+--- a/01_PROGRAMAS/alerts_bot/alpha_swing_engine.py
++++ b/01_PROGRAMAS/alerts_bot/alpha_swing_engine.py
+@@ -13,7 +13,7 @@
+ 
+ import json
+ import sqlite3
+-from datetime import datetime
++from datetime import date, datetime, timedelta
+ from statistics import median
+ from zoneinfo import ZoneInfo
+ 
+@@ -187,6 +187,29 @@
+     return out
+ 
+ 
++_NYSE_HOLIDAYS = {
++    "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25", "2026-06-19",
++    "2026-07-03", "2026-09-07", "2026-11-26", "2026-12-25",
++    "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31", "2027-06-18",
++    "2027-07-05", "2027-09-06", "2027-11-25", "2027-12-24",
++}
++
++
++def _calendar_sessions(opened_date: str, current_date: str) -> int:
++    """NYSE sessions strictly after opened_date up to and including current_date."""
++    try:
++        d = date.fromisoformat(opened_date[:10]) + timedelta(days=1)
++        end = date.fromisoformat(current_date[:10])
++    except ValueError:
++        return 0
++    n = 0
++    while d <= end:
++        if d.weekday() < 5 and d.isoformat() not in _NYSE_HOLIDAYS:
++            n += 1
++        d += timedelta(days=1)
++    return n
++
++
+ def _sessions_seen(conn: sqlite3.Connection, ticker: str, opened_date: str, current_date: str) -> int:
+     if not opened_date or not current_date or current_date <= opened_date:
+         return 0
+@@ -196,7 +219,19 @@
+            WHERE ticker=? AND trade_date>? AND trade_date<=?""",
+         (ticker, opened_date, current_date),
+     ).fetchone()
+-    return int((row[0] if row else 0) or 0)
++    cached = int((row[0] if row else 0) or 0)
++    # price_cache only holds some tickers: without this fallback TIME_STOP never fired
++    # (e.g. RF open since 2026-09-25 with sessions_seen=0).
++    return max(cached, _calendar_sessions(opened_date, current_date))
++
++
++def _position_snapshot(position: dict) -> dict:
++    """Row copy for event payloads WITHOUT its own payload_json.
++
++    Embedding payload_json made every update nest (and re-escape) the previous
++    payload, growing rows exponentially (~890 MB per open position by 2026-11).
++    """
++    return {k: v for k, v in position.items() if k != "payload_json"}
+ 
+ 
+ def _record_event(
+@@ -425,7 +460,7 @@
+             selected_row = selected.get(ticker) or {}
+             alpha_score = _f(selected_row.get("underlying_alpha_score") or selected_row.get("conviction"), current.get("fusion_score"))
+             event_payload = {
+-                "position": position,
++                "position": _position_snapshot(position),
+                 "current": current,
+                 "selected": selected_row,
+                 "sessions_seen": sessions,

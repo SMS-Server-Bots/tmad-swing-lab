@@ -5,7 +5,7 @@ escribiendo en WAL) y vuelca el SQL comprimido con gzip en partes de tamaño fij
 libre para la salida comprimida (normalmente un 10-20 % del tamaño de la base), no para una copia completa.
 
     python tmad_sqlite_stream_backup.py dump    <base.db> <carpeta_salida> [--part-mb 1800] [--stem nombre]
-    python tmad_sqlite_stream_backup.py restore <carpeta_salida> <nueva_base.db>
+    python tmad_sqlite_stream_backup.py restore <carpeta_salida> <nueva_base.db> [--skip-huge-mb 100]
     python tmad_sqlite_stream_backup.py verify  <carpeta_salida>
 
 La salida contiene ``<nombre>.sql.gz.partNNN`` y ``<nombre>.manifest.json`` (SHA-256 de cada parte y del
@@ -137,26 +137,66 @@ class _PartReader(io.RawIOBase):
             self.fh.close(); self.fh = None
 
 
-def restore(folder: str, target: str) -> None:
+def restore(folder: str, target: str, skip_mb: int = 0) -> None:
+    """Restaura en binario, sentencia a sentencia.
+
+    skip_mb > 0: aparta (sin cargarlas en memoria) las líneas INSERT de más de skip_mb MB y las descuenta
+    al comprobar los recuentos. Insertar una fila de ~900 MB desde SQL necesita ~7 GB de RAM en Python.
+    """
     man = verify(folder)
     if os.path.exists(target):
         raise SystemExit(f"{target} ya existe: no se sobrescribe")
-    con = sqlite3.connect(target); con.execute("PRAGMA journal_mode=OFF"); con.execute("PRAGMA synchronous=OFF")
-    stmt = []
-    with gzip.GzipFile(fileobj=io.BufferedReader(_PartReader(folder, man["parts"]), 1 << 20)) as gz:
-        for raw in io.TextIOWrapper(gz, encoding="utf-8"):
-            stmt.append(raw)
-            if sqlite3.complete_statement("".join(stmt)):
-                s = "".join(stmt).strip(); stmt = []
-                if s in ("BEGIN TRANSACTION;", "COMMIT;"):
-                    continue
-                con.execute(s)
-    con.commit()
-    bad = {t: (n, con.execute(f'select count(*) from "{t}"').fetchone()[0]) for t, n in man["row_counts"].items()}
+    con = sqlite3.connect(target, isolation_level=None)
+    con.execute("PRAGMA journal_mode=OFF"); con.execute("PRAGMA synchronous=OFF")
+    con.execute("BEGIN")
+    raw = io.BufferedReader(_PartReader(folder, man["parts"]), 1 << 20)
+    buf: list[bytes] = []
+    n = 0
+    skipped: dict[str, int] = {}
+    limit = skip_mb * 1024 * 1024 if skip_mb else -1
+    with gzip.GzipFile(fileobj=raw, mode="rb") as gz:
+        while True:
+            line = gz.readline(limit)
+            if not line:
+                break
+            if skip_mb and len(line) >= limit and not line.endswith(b"\n") and not buf:
+                head = line[:200].decode("utf-8", "replace"); total = len(line); line = None
+                while True:
+                    chunk = gz.readline(limit)
+                    total += len(chunk)
+                    if not chunk or chunk.endswith(b"\n"):
+                        break
+                import re as _re
+                m = _re.match(r'INSERT INTO "?([^"\s(]+)"?', head)
+                tname = m.group(1) if m else "?"
+                skipped[tname] = skipped.get(tname, 0) + 1
+                print(f"APARTADA fila de {total/1e6:.1f} MB en {tname}: {head[:90]}", file=sys.stderr, flush=True)
+                continue
+            buf.append(line); line = None
+            if not buf[-1].rstrip().endswith(b";"):
+                continue
+            data = buf[0] if len(buf) == 1 else b"".join(buf)
+            stmt = data.decode("utf-8"); data = None
+            if not sqlite3.complete_statement(stmt):
+                stmt = None
+                continue
+            buf = []
+            stmt = stmt.strip()
+            if stmt not in ("BEGIN TRANSACTION;", "COMMIT;"):
+                con.execute(stmt); n += 1
+            stmt = None
+            if n and n % 200000 == 0:
+                con.execute("COMMIT"); con.execute("BEGIN")
+    if buf and b"".join(buf).strip():
+        raise SystemExit("El volcado termina con una sentencia incompleta")
+    con.execute("COMMIT")
+    bad = {t: (k - skipped.get(t, 0), con.execute(f'select count(*) from "{t}"').fetchone()[0]) for t, k in man["row_counts"].items()}
     bad = {t: v for t, v in bad.items() if v[0] != v[1]}
     con.close()
     if bad:
         raise SystemExit(f"Recuentos distintos tras restaurar: {bad}")
+    if skipped:
+        print(f"Filas apartadas por tamaño: {skipped}", file=sys.stderr)
 
 
 if __name__ == "__main__":
@@ -170,6 +210,7 @@ if __name__ == "__main__":
     elif cmd == "verify":
         verify(sys.argv[2]); print("VERIFY_OK")
     elif cmd == "restore":
-        restore(sys.argv[2], sys.argv[3]); print("RESTORE_OK")
+        skip = int(sys.argv[sys.argv.index("--skip-huge-mb") + 1]) if "--skip-huge-mb" in sys.argv else 0
+        restore(sys.argv[2], sys.argv[3], skip); print("RESTORE_OK")
     else:
         raise SystemExit(__doc__)

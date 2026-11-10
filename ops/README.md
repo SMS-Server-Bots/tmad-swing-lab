@@ -49,3 +49,10 @@ Con los datos del diagnóstico decidiremos entre: ampliar el disco del VPS (lo m
 ### 4. Protección del histórico (6.2.68)
 
 Sigue pendiente en `tmad-dual-bot`: `rebuild_canonical_daily_history` en `main` aún hace un `DELETE` global.
+
+
+## Estado tras la intervención del 09–10/11/2026
+
+- Proceso `TMAD_DATA_SNAPSHOT.py` colgado **desde el 30/09** (40 días leyendo la base de Alerts): terminado. Tarea `Trumppetta_TMAD_Data_Mutable_Backup` desactivada. Se borraron 3,65 GB de temporales.
+- Backup nuevo `tmad-alerts-db-latest` subido y verificado (0,85 GB, 23 min). Desde el entorno de Claude se ha descargado y **restaurado completo**: 117 s, `quick_check ok` y recuentos de las 45 tablas idénticos, apartando solo 3 filas del bug de abajo.
+- **Bug encontrado en `alpha_swing_engine.py`** (filas `payload_json` de ~900 MB y `TIME_STOP` que nunca salta): ver `patches/README.md`. Mientras no se arregle, restaurar esas 3 filas necesitaría ~7 GB de RAM; usa `restore ... --skip-huge-mb 100` para restaurar todo lo demás.
