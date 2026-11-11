@@ -10,6 +10,7 @@ for s in range(25,len(dates),5):
     te['pm']=clf.predict_proba(te[NUM])[:,1]; parts.append(te)
 R=pd.concat(parts)
 auc=np.mean([roc_auc_score(g.mv,g.pm) for d,g in R.groupby('date') if g.mv.nunique()==2])
-R['dec']=R.groupby('date').pm.transform(lambda s:pd.qcut(s.rank(method='first'),10,labels=False))
+R.to_pickle("calib/mag_pred.pkl")
+R["dec"]=R.groupby('date').pm.transform(lambda s:pd.qcut(s.rank(method='first'),10,labels=False))
 print("AUC movimiento ±5%% en 5 sesiones: %.3f"%auc)
 print(R.groupby('dec').agg(mueve=('mv','mean'),toca_arriba=('mfe5',lambda x:(x>=5).mean()),toca_abajo=('mae5',lambda x:(x<=-5).mean())).mul(100).round(0).T.to_string())
