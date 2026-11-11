@@ -1,0 +1,867 @@
+From b480f6f2e5d0898931e715bfbb257c2a8d97b278 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 11 Nov 2026 08:22:08 +0100
+Subject: [PATCH] =?UTF-8?q?Data=20Bot:=20captura=20de=20flujo=20(mapas=20d?=
+ =?UTF-8?q?e=20calor=20de=20opciones,=20r=C3=A9gimen=20Score,=20velas=201?=
+ =?UTF-8?q?=20min)=20en=20tmad=5Fflow=5Flive.db?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- flow_capture.py: hilo propio a las 12:10 Madrid; option-heatmap call/put del universo (cambio de OI por
+  contrato, filtrado DTE<=90 y ±30%), score/regime, velas 1 min incrementales (lunes).
+- FLOW_DB nueva, retención 14 días, copiada al ZIP semanal como flow_<semana>.sqlite.
+- Score: backtest y basket-history (403 admin) ya no tumban la captura; top-longs vuelve a guardarse.
+- main.py --once flow; validation_support/validar_flow_capture.py.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TVu7xCZHfBXaQhSnFcTJQG
+---
+ 01_PROGRAMAS/data_bot/README.md               |  21 +
+ 01_PROGRAMAS/data_bot/archive_manager.py      |   6 +
+ 01_PROGRAMAS/data_bot/config.py               |  20 +
+ 01_PROGRAMAS/data_bot/db_core.py              | 106 ++++-
+ 01_PROGRAMAS/data_bot/flow_capture.py         | 413 ++++++++++++++++++
+ 01_PROGRAMAS/data_bot/main.py                 |  51 ++-
+ .../validar_flow_capture.py                   |  86 ++++
+ 7 files changed, 692 insertions(+), 11 deletions(-)
+ create mode 100644 01_PROGRAMAS/data_bot/flow_capture.py
+ create mode 100644 01_PROGRAMAS/validation_support/validar_flow_capture.py
+
+diff --git a/01_PROGRAMAS/data_bot/README.md b/01_PROGRAMAS/data_bot/README.md
+index af38787..815c679 100644
+--- a/01_PROGRAMAS/data_bot/README.md
++++ b/01_PROGRAMAS/data_bot/README.md
+@@ -7,6 +7,27 @@
+ - ZIP semanal deep: Scanner/GEX/raw/meta.
+ - ZIP intradía diario: runs horarios no-deep.
+ - ZIP de perfiles GEX: baseline + deltas strike×expiry.
++- BD de flujo `tmad_flow_live.db` → `flow_<semana>.sqlite` dentro del ZIP semanal (ver abajo).
++
++## Captura de flujo (`flow_capture.py`)
++
++Datos que tmad.app publica sin histórico y que antes no se guardaban. Se capturan en un hilo propio
++(no bloquea Scanner ni GEX), una vez al día a las `FLOW_CAPTURE_TIMES` (12:10 Madrid, antes de la apertura):
++
++- `option_heatmap_snapshots`: `/api/stock/{t}/option-heatmap?side=call|put` — volumen, OI, cambio de OI, cambio de
++  GEX e IV por contrato (DTE <= 90 y +-30 % del precio, en `contracts_blob` JSON columnar + zlib) y un resumen por
++  ticker. Diario, todo el universo, ~10 MB/día.
++- `score_regime_daily`: `/api/score/regime` — acierto móvil del top-10 del Score a 5 y 10 días. Diario.
++- `intraday_bars_1m`: `/api/stock/{t}/intraday?days=30` — velas 1 min con pre/post-market, incremental por ticker
++  (`intraday_bars_cursor`), solo sesiones completas. Lunes (o si la última tiene > 8 días). ~250 MB la primera
++  vez, ~50 MB/semana.
++
++Variables: `FLOW_CAPTURE_ENABLED`, `FLOW_CAPTURE_TIMES`, `FETCH_OPTION_HEATMAP`, `FETCH_SCORE_REGIME`,
++`FETCH_INTRADAY_BARS`, `INTRADAY_BARS_WEEKDAYS`, `FLOW_LIVE_RETENTION_DAYS` (14). Manual: `python main.py --once flow`.
++Leer un blob: `flow_capture.unpack(blob)` -> `{campo: [valores]}`. Validación: `validation_support/validar_flow_capture.py`.
++
++`score/backtest` y `score/basket-history` devuelven 403 («Admin access required») desde nov-2026: la captura
++Score los omite en lugar de fallar, así que `score_top_longs` vuelve a guardarse.
+ 
+ ## Seguridad ZIP
+ 
+diff --git a/01_PROGRAMAS/data_bot/archive_manager.py b/01_PROGRAMAS/data_bot/archive_manager.py
+index 1734019..0df42c2 100644
+--- a/01_PROGRAMAS/data_bot/archive_manager.py
++++ b/01_PROGRAMAS/data_bot/archive_manager.py
+@@ -294,6 +294,7 @@ def _archive_period(period_key: str, start: str, end: str, weekly: bool, finaliz
+     gex_archive = period_dir / f"gex_{period_key}.sqlite"
+     raw_archive = period_dir / f"raw_{period_key}.sqlite"
+     meta_archive = period_dir / f"meta_{period_key}.sqlite"
++    flow_archive = period_dir / f"flow_{period_key}.sqlite"
+ 
+     scanner_tables = [
+         ("scanner_runs", "captured_at_madrid"),
+@@ -335,6 +336,11 @@ def _archive_period(period_key: str, start: str, end: str, weekly: bool, finaliz
+     copy_table_range(RAW_DB, raw_archive, "raw_api_payloads", "captured_at_madrid", start, end)
+     copy_table_range(META_DB, meta_archive, "extra_fields", "captured_at_madrid", start, end)
+     copy_table_range(META_DB, meta_archive, "schema_change_events", "event_at_madrid", start, end)
++    # Flujo de opciones / velas 1 min / régimen Score: BD propia, entra en el ZIP semanal como flow_<semana>.sqlite.
++    flow_db = getattr(config, "FLOW_DB", None)
++    if flow_db is not None and Path(flow_db).exists():
++        for table in ("flow_runs", "option_heatmap_snapshots", "score_regime_daily", "intraday_bars_1m"):
++            copy_table_range(Path(flow_db), flow_archive, table, "captured_at_madrid", start, end)
+ 
+     cleanup_archive(scanner_archive, gex_archive, raw_archive, meta_archive)
+     if weekly:
+diff --git a/01_PROGRAMAS/data_bot/config.py b/01_PROGRAMAS/data_bot/config.py
+index 0ff1fc0..e97038d 100644
+--- a/01_PROGRAMAS/data_bot/config.py
++++ b/01_PROGRAMAS/data_bot/config.py
+@@ -94,6 +94,8 @@ SCANNER_DB = DB_DIR / "tmad_scanner_live.db"
+ GEX_DB = DB_DIR / "tmad_gex_live.db"
+ RAW_DB = DB_DIR / "tmad_raw_live.db"
+ META_DB = DB_DIR / "tmad_meta_live.db"
++# Flujo de opciones y velas de 1 min (BD propia para no inflar la del Scanner).
++FLOW_DB = DB_DIR / "tmad_flow_live.db"
+ 
+ SCANNER_URL = os.getenv("SCANNER_URL", "https://tmad.app/api/scanner")
+ STOCK_DETAIL_URL_TEMPLATE = os.getenv("STOCK_DETAIL_URL_TEMPLATE", "https://tmad.app/api/stock/{ticker}")
+@@ -221,6 +223,24 @@ SCORE_BACKTEST_URL = os.getenv("SCORE_BACKTEST_URL", "https://tmad.app/api/score
+ SCORE_BASKET_HISTORY_URL = os.getenv("SCORE_BASKET_HISTORY_URL", "https://tmad.app/api/score/basket-history")
+ WATCHLIST_MAX_DASHBOARDS = _int("WATCHLIST_MAX_DASHBOARDS", 50)
+ 
++# --- Captura de flujo (FLOW_DB): mapas de calor de opciones, régimen del Score y velas 1 min ---
++# El mapa de calor (/option-heatmap) solo publica la última foto; si no se guarda cada día se pierde.
++# Se captura en un hilo aparte, antes de la apertura (la foto "daily" de la sesión anterior ya está cerrada).
++FLOW_CAPTURE_ENABLED = _bool("FLOW_CAPTURE_ENABLED", True)
++FLOW_CAPTURE_TIMES = _list("FLOW_CAPTURE_TIMES", "12:10")
++FLOW_HTTP_SLEEP_SECONDS = max(0.0, _float("FLOW_HTTP_SLEEP_SECONDS", 0.15))
++FLOW_LIVE_RETENTION_DAYS = max(8, _int("FLOW_LIVE_RETENTION_DAYS", 14))
++FETCH_OPTION_HEATMAP = _bool("FETCH_OPTION_HEATMAP", True)
++OPTION_HEATMAP_URL_TEMPLATE = os.getenv("OPTION_HEATMAP_URL_TEMPLATE", "https://tmad.app/api/stock/{ticker}/option-heatmap?side={side}")
++OPTION_HEATMAP_MAX_DTE = _int("OPTION_HEATMAP_MAX_DTE", 90)
++OPTION_HEATMAP_MAX_MONEYNESS = _float("OPTION_HEATMAP_MAX_MONEYNESS", 0.30)
++FETCH_SCORE_REGIME = _bool("FETCH_SCORE_REGIME", True)
++SCORE_REGIME_URL = os.getenv("SCORE_REGIME_URL", "https://tmad.app/api/score/regime")
++# Velas de 1 min (30 días con pre/post-market): incremental, solo sesiones completas.
++FETCH_INTRADAY_BARS = _bool("FETCH_INTRADAY_BARS", True)
++INTRADAY_BARS_WEEKDAYS = [int(x) for x in _list("INTRADAY_BARS_WEEKDAYS", "0") if str(x).strip().isdigit()]
++INTRADAY_BARS_MAX_AGE_DAYS = _int("INTRADAY_BARS_MAX_AGE_DAYS", 8)
++
+ # Canonical daily closes are the primary rolling calibration memory. Intraday
+ # runs are archived to daily ZIPs and removed from live DBs after the close.
+ DAILY_CLOSE_WINDOW_SESSIONS = _int("DAILY_CLOSE_WINDOW_SESSIONS", 30)
+diff --git a/01_PROGRAMAS/data_bot/db_core.py b/01_PROGRAMAS/data_bot/db_core.py
+index a99cd05..6812335 100644
+--- a/01_PROGRAMAS/data_bot/db_core.py
++++ b/01_PROGRAMAS/data_bot/db_core.py
+@@ -27,6 +27,7 @@ def scanner_conn(): return connect(SCANNER_DB)
+ def gex_conn(): return connect(GEX_DB)
+ def raw_conn(): return connect(RAW_DB)
+ def meta_conn(): return connect(META_DB)
++def flow_conn(): return connect(cfg.FLOW_DB)
+ 
+ 
+ def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+@@ -48,7 +49,101 @@ def _ensure_columns(conn: sqlite3.Connection, table: str, cols: dict[str, str]):
+ 
+ 
+ def ensure_all_schemas():
+-    ensure_scanner_schema(); ensure_gex_schema(); ensure_raw_schema(); ensure_meta_schema()
++    ensure_scanner_schema(); ensure_gex_schema(); ensure_raw_schema(); ensure_meta_schema(); ensure_flow_schema()
++
++
++def ensure_flow_schema():
++    """BD de flujo: mapas de calor de opciones (cambio de OI por contrato), régimen del Score y velas 1 min.
++
++    Los contratos y las velas se guardan en columnas comprimidas (JSON columnar + zlib) para que una
++    foto diaria del universo ocupe ~10 MB y una semana de velas 1 min ~50 MB.
++    """
++    conn = flow_conn()
++    conn.executescript('''
++    CREATE TABLE IF NOT EXISTS flow_runs (
++        id INTEGER PRIMARY KEY AUTOINCREMENT,
++        kind TEXT NOT NULL,
++        slot_key TEXT,
++        captured_at_utc TEXT NOT NULL,
++        captured_at_madrid TEXT NOT NULL,
++        finished_at_madrid TEXT,
++        status TEXT NOT NULL,
++        tickers_total INTEGER DEFAULT 0,
++        tickers_ok INTEGER DEFAULT 0,
++        tickers_failed INTEGER DEFAULT 0,
++        rows_written INTEGER DEFAULT 0,
++        bytes_written INTEGER DEFAULT 0,
++        error_message TEXT
++    );
++    CREATE INDEX IF NOT EXISTS idx_flow_runs_kind ON flow_runs(kind, status, captured_at_madrid);
++    CREATE TABLE IF NOT EXISTS option_heatmap_snapshots (
++        id INTEGER PRIMARY KEY AUTOINCREMENT,
++        flow_run_id INTEGER NOT NULL,
++        captured_at_utc TEXT NOT NULL,
++        captured_at_madrid TEXT NOT NULL,
++        ticker TEXT NOT NULL,
++        side TEXT NOT NULL,
++        mode TEXT,
++        session_date TEXT,
++        previous_session_date TEXT,
++        source_captured_at TEXT,
++        spot REAL,
++        gex_complete INTEGER,
++        total_otm_gex REAL,
++        contracts_total INTEGER,
++        contracts_kept INTEGER,
++        oi_total REAL,
++        oi_change_total REAL,
++        oi_change_otm REAL,
++        oi_change_near_otm REAL,
++        volume_total REAL,
++        volume_otm REAL,
++        gex_change_total REAL,
++        top_oi_change_strike REAL,
++        top_oi_change_dte INTEGER,
++        top_oi_change REAL,
++        contracts_codec TEXT,
++        contracts_blob BLOB,
++        UNIQUE(ticker, side, session_date, mode)
++    );
++    CREATE INDEX IF NOT EXISTS idx_heatmap_session ON option_heatmap_snapshots(session_date, side);
++    CREATE TABLE IF NOT EXISTS score_regime_daily (
++        id INTEGER PRIMARY KEY AUTOINCREMENT,
++        flow_run_id INTEGER NOT NULL,
++        captured_at_madrid TEXT NOT NULL,
++        window_days INTEGER NOT NULL,
++        regime_date TEXT NOT NULL,
++        lists_count INTEGER,
++        wins INTEGER,
++        win_rate REAL,
++        short_win_rate REAL,
++        avg_return REAL,
++        spy_return REAL,
++        alpha REAL,
++        UNIQUE(window_days, regime_date)
++    );
++    CREATE TABLE IF NOT EXISTS intraday_bars_1m (
++        id INTEGER PRIMARY KEY AUTOINCREMENT,
++        flow_run_id INTEGER NOT NULL,
++        captured_at_utc TEXT NOT NULL,
++        captured_at_madrid TEXT NOT NULL,
++        ticker TEXT NOT NULL,
++        first_ts TEXT NOT NULL,
++        last_ts TEXT NOT NULL,
++        bars INTEGER NOT NULL,
++        sessions INTEGER,
++        bars_codec TEXT,
++        bars_blob BLOB,
++        UNIQUE(ticker, first_ts, last_ts)
++    );
++    CREATE INDEX IF NOT EXISTS idx_bars_ticker ON intraday_bars_1m(ticker, last_ts);
++    CREATE TABLE IF NOT EXISTS intraday_bars_cursor (
++        ticker TEXT PRIMARY KEY,
++        last_ts TEXT NOT NULL,
++        updated_at_madrid TEXT NOT NULL
++    );
++    ''')
++    conn.commit(); conn.close()
+ 
+ 
+ def ensure_scanner_schema():
+@@ -1519,6 +1614,15 @@ def purge_live_retention():
+             try: cur.execute('DELETE FROM ticker_signal_daily WHERE history_date < ?', (compact_cutoff,))
+             except Exception: pass
+         conn.commit(); conn.execute('PRAGMA wal_checkpoint(TRUNCATE);'); conn.close()
++    # FLOW_DB: retención propia (> 7 días para que el archivo semanal ya la haya copiado). El cursor
++    # de velas no se purga: es lo que hace incremental la descarga.
++    if cfg.FLOW_DB.exists():
++        flow_cutoff = (now_madrid() - timedelta(days=cfg.FLOW_LIVE_RETENTION_DAYS)).isoformat()
++        conn = connect(cfg.FLOW_DB); cur = conn.cursor()
++        for table in ('option_heatmap_snapshots', 'intraday_bars_1m', 'score_regime_daily', 'flow_runs'):
++            try: cur.execute(f'DELETE FROM {table} WHERE captured_at_madrid < ?', (flow_cutoff,))
++            except Exception: pass
++        conn.commit(); conn.execute('PRAGMA wal_checkpoint(TRUNCATE);'); conn.close()
+ 
+ 
+ def _fetch_invalid_run_ids_with_success(conn: sqlite3.Connection, table: str) -> list[tuple[int, str, str]]:
+diff --git a/01_PROGRAMAS/data_bot/flow_capture.py b/01_PROGRAMAS/data_bot/flow_capture.py
+new file mode 100644
+index 0000000..6705f5d
+--- /dev/null
++++ b/01_PROGRAMAS/data_bot/flow_capture.py
+@@ -0,0 +1,413 @@
++"""Captura de flujo para FLOW_DB (tmad_flow_live.db).
++
++Guarda lo que tmad.app publica pero no conserva histórico y el bot no guardaba:
++
++* ``/api/stock/{t}/option-heatmap?side=call|put``: por contrato, volumen, OI, cambio de OI frente a la
++  sesión anterior, cambio de GEX e IV. TMAD solo sirve la última foto, así que se captura una vez al día
++  (antes de la apertura, cuando la foto "daily" de la sesión anterior ya está cerrada).
++* ``/api/score/regime``: acierto móvil del top-10 del Score a 5 y 10 días que publica TMAD.
++* ``/api/stock/{t}/intraday?days=30``: velas de 1 min con pre/post-market. Incremental por ticker, solo
++  sesiones completas; una vez por semana basta porque la ventana es de 30 días.
++
++Se ejecuta en un hilo propio con su propio cliente HTTP para no bloquear el Scanner ni el GEX.
++Escribe solo en FLOW_DB. El archivo semanal la copia como ``flow_<semana>.sqlite``.
++"""
++from __future__ import annotations
++
++import json
++import threading
++import time
++import traceback
++import zlib
++from datetime import datetime, timedelta
++
++import config
++from db_core import connect, ensure_flow_schema
++from time_utils import MARKET_TZ, now_madrid, ts_madrid_str, ts_utc_str
++
++CODEC = "json-columnar+zlib"
++HEATMAP_FIELDS = ("strike", "dte", "openInterest", "oiChange", "volume", "impliedVolatility", "gex", "gexChange")
++BAR_FIELDS = ("open", "high", "low", "close", "volume")
++
++_lock = threading.Lock()
++_thread: threading.Thread | None = None
++
++
++def _log(msg: str) -> None:
++    print(f"[flow] {msg}", flush=True)
++
++
++def _pack(columns: dict) -> bytes:
++    return zlib.compress(json.dumps(columns, separators=(",", ":")).encode("utf-8"), 6)
++
++
++def unpack(blob: bytes) -> dict:
++    """Inverso de _pack, para análisis: devuelve {campo: [valores...]}."""
++    return json.loads(zlib.decompress(blob).decode("utf-8"))
++
++
++def _num(x):
++    try:
++        if x is None:
++            return None
++        v = float(x)
++        return v if v == v else None
++    except (TypeError, ValueError):
++        return None
++
++
++def _get(client, url: str):
++    from tmad_client import fetch_json_with_retries
++
++    payload, status = fetch_json_with_retries(client, url)
++    if config.FLOW_HTTP_SLEEP_SECONDS:
++        time.sleep(config.FLOW_HTTP_SLEEP_SECONDS)
++    return payload, status
++
++
++# --------------------------------------------------------------------------- universo
++
++def universe_tickers() -> list[str]:
++    """Tickers del último Scanner con éxito (sin pedir el Scanner otra vez)."""
++    conn = connect(config.SCANNER_DB)
++    try:
++        row = conn.execute("SELECT id FROM scanner_runs WHERE status='success' ORDER BY id DESC LIMIT 1").fetchone()
++        if not row:
++            return []
++        rows = conn.execute(
++            "SELECT DISTINCT ticker FROM scanner_snapshots WHERE scanner_run_id=? AND ticker IS NOT NULL", (int(row[0]),)
++        ).fetchall()
++        return sorted({str(r[0]).upper() for r in rows if r[0]})
++    finally:
++        conn.close()
++
++
++# --------------------------------------------------------------------------- run bookkeeping
++
++def _start_run(kind: str, slot_key: str, total: int) -> int:
++    conn = connect(config.FLOW_DB)
++    try:
++        cur = conn.execute(
++            "INSERT INTO flow_runs(kind,slot_key,captured_at_utc,captured_at_madrid,status,tickers_total) VALUES (?,?,?,?,?,?)",
++            (kind, slot_key, ts_utc_str(), ts_madrid_str(), "running", total),
++        )
++        conn.commit()
++        return int(cur.lastrowid)
++    finally:
++        conn.close()
++
++
++def _finish_run(run_id: int, status: str, ok: int, failed: int, rows: int, nbytes: int, error: str | None = None) -> None:
++    conn = connect(config.FLOW_DB)
++    try:
++        conn.execute(
++            "UPDATE flow_runs SET status=?,finished_at_madrid=?,tickers_ok=?,tickers_failed=?,rows_written=?,bytes_written=?,error_message=? WHERE id=?",
++            (status, ts_madrid_str(), ok, failed, rows, nbytes, (error or "")[:1000] or None, run_id),
++        )
++        conn.commit()
++    finally:
++        conn.close()
++
++
++def _done(kind: str, slot_key: str) -> bool:
++    conn = connect(config.FLOW_DB)
++    try:
++        return conn.execute(
++            "SELECT 1 FROM flow_runs WHERE kind=? AND slot_key=? AND status IN ('success','partial') LIMIT 1", (kind, slot_key)
++        ).fetchone() is not None
++    finally:
++        conn.close()
++
++
++def _last_success_age_days(kind: str) -> float | None:
++    conn = connect(config.FLOW_DB)
++    try:
++        row = conn.execute(
++            "SELECT max(captured_at_madrid) FROM flow_runs WHERE kind=? AND status IN ('success','partial')", (kind,)
++        ).fetchone()
++    finally:
++        conn.close()
++    if not row or not row[0]:
++        return None
++    try:
++        last = datetime.fromisoformat(str(row[0]))
++        return (now_madrid() - last).total_seconds() / 86400.0
++    except Exception:
++        return None
++
++
++# --------------------------------------------------------------------------- option heatmap
++
++def summarize_heatmap(snapshot: dict, max_dte: int, max_moneyness: float) -> tuple[dict, dict]:
++    """Devuelve (resumen, columnas filtradas) de una foto del mapa de calor."""
++    contracts = snapshot.get("contracts") or []
++    spot = _num(snapshot.get("spot"))
++    kept = []
++    s = {"oi_total": 0.0, "oi_change_total": 0.0, "oi_change_otm": 0.0, "oi_change_near_otm": 0.0,
++         "volume_total": 0.0, "volume_otm": 0.0, "gex_change_total": 0.0}
++    top = None
++    for c in contracts:
++        if not isinstance(c, dict):
++            continue
++        oi = _num(c.get("openInterest")) or 0.0
++        doi = _num(c.get("oiChange")) or 0.0
++        vol = _num(c.get("volume")) or 0.0
++        dg = _num(c.get("gexChange")) or 0.0
++        dte = _num(c.get("dte"))
++        strike = _num(c.get("strike"))
++        otm = bool(c.get("otm"))
++        s["oi_total"] += oi; s["oi_change_total"] += doi; s["volume_total"] += vol; s["gex_change_total"] += dg
++        if otm:
++            s["oi_change_otm"] += doi; s["volume_otm"] += vol
++            if dte is not None and dte <= 45:
++                s["oi_change_near_otm"] += doi
++        if top is None or abs(doi) > abs(top[2]):
++            top = (strike, int(dte) if dte is not None else None, doi)
++        if spot and strike and dte is not None and dte <= max_dte and abs(strike / spot - 1.0) <= max_moneyness:
++            kept.append(c)
++    cols = {f: [c.get(f) for c in kept] for f in HEATMAP_FIELDS}
++    cols["otm"] = [1 if c.get("otm") else 0 for c in kept]
++    s.update({
++        "contracts_total": len(contracts), "contracts_kept": len(kept),
++        "top_oi_change_strike": top[0] if top else None, "top_oi_change_dte": top[1] if top else None,
++        "top_oi_change": top[2] if top else None,
++    })
++    return s, cols
++
++
++def capture_option_heatmaps(client, tickers: list[str], slot_key: str) -> dict:
++    run_id = _start_run("option_heatmap", slot_key, len(tickers))
++    ok = failed = rows = nbytes = 0
++    errors: list[str] = []
++    conn = connect(config.FLOW_DB)
++    try:
++        for i, t in enumerate(tickers, 1):
++            t_ok = True
++            for side in ("call", "put"):
++                try:
++                    url = config.OPTION_HEATMAP_URL_TEMPLATE.format(ticker=t, side=side)
++                    payload, _st = _get(client, url)
++                    snap = (payload or {}).get("snapshot") or {}
++                    if not snap.get("contracts"):
++                        continue
++                    summ, cols = summarize_heatmap(snap, config.OPTION_HEATMAP_MAX_DTE, config.OPTION_HEATMAP_MAX_MONEYNESS)
++                    blob = _pack(cols)
++                    conn.execute(
++                        """INSERT OR REPLACE INTO option_heatmap_snapshots(
++                            flow_run_id,captured_at_utc,captured_at_madrid,ticker,side,mode,session_date,previous_session_date,
++                            source_captured_at,spot,gex_complete,total_otm_gex,contracts_total,contracts_kept,oi_total,
++                            oi_change_total,oi_change_otm,oi_change_near_otm,volume_total,volume_otm,gex_change_total,
++                            top_oi_change_strike,top_oi_change_dte,top_oi_change,contracts_codec,contracts_blob)
++                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
++                        (run_id, ts_utc_str(), ts_madrid_str(), t, side, payload.get("mode"), snap.get("sessionDate"),
++                         snap.get("previousSessionDate"), snap.get("capturedAt"), _num(snap.get("spot")),
++                         1 if snap.get("gexComplete") else 0, _num(snap.get("totalOtmGex")), summ["contracts_total"],
++                         summ["contracts_kept"], summ["oi_total"], summ["oi_change_total"], summ["oi_change_otm"],
++                         summ["oi_change_near_otm"], summ["volume_total"], summ["volume_otm"], summ["gex_change_total"],
++                         summ["top_oi_change_strike"], summ["top_oi_change_dte"], summ["top_oi_change"], CODEC, blob),
++                    )
++                    rows += 1; nbytes += len(blob)
++                except Exception as e:  # noqa: BLE001
++                    t_ok = False
++                    if len(errors) < 20:
++                        errors.append(f"{t}/{side}: {type(e).__name__}: {str(e)[:120]}")
++            ok += 1 if t_ok else 0
++            failed += 0 if t_ok else 1
++            if i % 50 == 0:
++                conn.commit()
++                _log(f"heatmap {i}/{len(tickers)} ok={ok} failed={failed} rows={rows} {nbytes/1e6:.1f} MB")
++        conn.commit()
++    finally:
++        conn.close()
++    status = "success" if failed == 0 else ("partial" if ok > 0 else "failed")
++    _finish_run(run_id, status, ok, failed, rows, nbytes, "; ".join(errors) if errors else None)
++    return {"run_id": run_id, "status": status, "ok": ok, "failed": failed, "rows": rows, "mb": round(nbytes / 1e6, 1)}
++
++
++# --------------------------------------------------------------------------- score regime
++
++def capture_score_regime(client, slot_key: str) -> dict:
++    run_id = _start_run("score_regime", slot_key, 1)
++    rows = 0
++    try:
++        payload, _st = _get(client, config.SCORE_REGIME_URL)
++        windows = ((payload or {}).get("data") or {}).get("windows") or {}
++        conn = connect(config.FLOW_DB)
++        try:
++            for w, block in windows.items():
++                hist = list((block or {}).get("history") or [])
++                cur = (block or {}).get("current")
++                if isinstance(cur, dict):
++                    hist.append(cur)
++                for r in hist:
++                    if not isinstance(r, dict) or not r.get("date"):
++                        continue
++                    conn.execute(
++                        """INSERT OR REPLACE INTO score_regime_daily(flow_run_id,captured_at_madrid,window_days,regime_date,
++                           lists_count,wins,win_rate,short_win_rate,avg_return,spy_return,alpha) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
++                        (run_id, ts_madrid_str(), int(w), r.get("date"), r.get("count"), r.get("wins"), _num(r.get("winRate")),
++                         _num(r.get("shortWinRate")), _num(r.get("avgReturn")), _num(r.get("spyReturn")), _num(r.get("alpha"))),
++                    )
++                    rows += 1
++            conn.commit()
++        finally:
++            conn.close()
++        _finish_run(run_id, "success", 1, 0, rows, 0)
++        return {"status": "success", "rows": rows}
++    except Exception as e:  # noqa: BLE001
++        _finish_run(run_id, "failed", 0, 1, rows, 0, f"{type(e).__name__}: {e}")
++        return {"status": "failed", "error": str(e)[:200]}
++
++
++# --------------------------------------------------------------------------- intraday 1-min bars
++
++def _cursors() -> dict[str, str]:
++    conn = connect(config.FLOW_DB)
++    try:
++        return {str(r[0]): str(r[1]) for r in conn.execute("SELECT ticker,last_ts FROM intraday_bars_cursor").fetchall()}
++    finally:
++        conn.close()
++
++
++def capture_intraday_bars(client, tickers: list[str], slot_key: str) -> dict:
++    """Guarda las velas de sesiones completas (fecha de NY < hoy) posteriores al cursor de cada ticker."""
++    run_id = _start_run("intraday_bars_1m", slot_key, len(tickers))
++    today_ny = datetime.now(MARKET_TZ).strftime("%Y-%m-%d")
++    cursors = _cursors()
++    ok = failed = rows = nbytes = 0
++    errors: list[str] = []
++    conn = connect(config.FLOW_DB)
++    try:
++        for i, t in enumerate(tickers, 1):
++            try:
++                url = config.STOCK_INTRADAY_URL_TEMPLATE.format(ticker=t)
++                payload, _st = _get(client, url)
++                data = (payload or {}).get("data", payload) or {}
++                bars = data.get("intradayBars") or []
++                last = cursors.get(t, "")
++                new = [b for b in bars if isinstance(b, dict) and str(b.get("timestamp") or "") > last
++                       and str(b.get("timestamp") or "")[:10] < today_ny]
++                new.sort(key=lambda b: str(b.get("timestamp")))
++                if new:
++                    cols = {"ts": [str(b.get("timestamp")) for b in new]}
++                    for f in BAR_FIELDS:
++                        cols[f] = [b.get(f) for b in new]
++                    blob = _pack(cols)
++                    first_ts, last_ts = cols["ts"][0], cols["ts"][-1]
++                    sessions = len({ts[:10] for ts in cols["ts"]})
++                    conn.execute(
++                        """INSERT OR REPLACE INTO intraday_bars_1m(flow_run_id,captured_at_utc,captured_at_madrid,ticker,first_ts,
++                           last_ts,bars,sessions,bars_codec,bars_blob) VALUES (?,?,?,?,?,?,?,?,?,?)""",
++                        (run_id, ts_utc_str(), ts_madrid_str(), t, first_ts, last_ts, len(new), sessions, CODEC, blob),
++                    )
++                    conn.execute(
++                        "INSERT OR REPLACE INTO intraday_bars_cursor(ticker,last_ts,updated_at_madrid) VALUES (?,?,?)",
++                        (t, last_ts, ts_madrid_str()),
++                    )
++                    rows += 1; nbytes += len(blob)
++                ok += 1
++            except Exception as e:  # noqa: BLE001
++                failed += 1
++                if len(errors) < 20:
++                    errors.append(f"{t}: {type(e).__name__}: {str(e)[:120]}")
++            if i % 50 == 0:
++                conn.commit()
++                _log(f"velas 1m {i}/{len(tickers)} ok={ok} failed={failed} {nbytes/1e6:.1f} MB")
++        conn.commit()
++    finally:
++        conn.close()
++    status = "success" if failed == 0 else ("partial" if ok > 0 else "failed")
++    _finish_run(run_id, status, ok, failed, rows, nbytes, "; ".join(errors) if errors else None)
++    return {"run_id": run_id, "status": status, "ok": ok, "failed": failed, "rows": rows, "mb": round(nbytes / 1e6, 1)}
++
++
++# --------------------------------------------------------------------------- orchestration
++
++def _intraday_due(now: datetime) -> bool:
++    if not config.FETCH_INTRADAY_BARS:
++        return False
++    if now.weekday() in config.INTRADAY_BARS_WEEKDAYS:
++        return True
++    age = _last_success_age_days("intraday_bars_1m")
++    return age is None or age >= float(config.INTRADAY_BARS_MAX_AGE_DAYS)
++
++
++def run_flow_capture(slot_key: str, include_intraday: bool | None = None) -> dict:
++    """Ejecución completa (síncrona). La usa el hilo del daemon y ``main.py --once flow``."""
++    from tmad_client import make_client
++
++    ensure_flow_schema()
++    now = now_madrid()
++    tickers = universe_tickers()
++    out: dict = {"slot": slot_key, "tickers": len(tickers)}
++    if not tickers:
++        out["status"] = "no_universe"
++        _log("sin universo: no hay ningún Scanner con éxito en la BD")
++        return out
++    client = make_client()
++    try:
++        if config.FETCH_SCORE_REGIME and not _done("score_regime", slot_key):
++            out["score_regime"] = capture_score_regime(client, slot_key)
++        if config.FETCH_OPTION_HEATMAP and not _done("option_heatmap", slot_key):
++            _log(f"heatmap: {len(tickers)} tickers x 2 lados")
++            out["option_heatmap"] = capture_option_heatmaps(client, tickers, slot_key)
++        do_intraday = _intraday_due(now) if include_intraday is None else include_intraday
++        if do_intraday and not _done("intraday_bars_1m", slot_key):
++            _log(f"velas 1m: {len(tickers)} tickers")
++            out["intraday_bars_1m"] = capture_intraday_bars(client, tickers, slot_key)
++    finally:
++        client.close()
++    _log(f"fin {json.dumps(out, ensure_ascii=False)}")
++    return out
++
++
++def _due_slot(now: datetime) -> str | None:
++    if not config.FLOW_CAPTURE_ENABLED:
++        return None
++    current = now.hour * 60 + now.minute
++    due = []
++    for hhmm in config.FLOW_CAPTURE_TIMES:
++        try:
++            h, m = [int(x) for x in str(hhmm).split(":", 1)]
++        except Exception:
++            continue
++        if h * 60 + m <= current:
++            due.append(f"{now.strftime('%Y-%m-%d')}|{hhmm}")
++    return due[-1] if due else None
++
++
++def maybe_start_flow_capture(on_finish=None) -> bool:
++    """Lanza la captura en segundo plano si hay un slot pendiente hoy. Nunca bloquea al daemon."""
++    global _thread
++    if _thread is not None and _thread.is_alive():
++        return False
++    try:
++        ensure_flow_schema()
++        slot = _due_slot(now_madrid())
++        if not slot:
++            return False
++        pending = [k for k, on in (("score_regime", config.FETCH_SCORE_REGIME), ("option_heatmap", config.FETCH_OPTION_HEATMAP)) if on and not _done(k, slot)]
++        if _intraday_due(now_madrid()) and not _done("intraday_bars_1m", slot):
++            pending.append("intraday_bars_1m")
++        if not pending:
++            return False
++    except Exception as e:  # noqa: BLE001
++        _log(f"no se pudo comprobar el slot: {e}")
++        return False
++
++    def _worker():
++        if not _lock.acquire(blocking=False):
++            return
++        try:
++            res = run_flow_capture(slot)
++            if on_finish:
++                on_finish(res)
++        except Exception as e:  # noqa: BLE001
++            _log(f"captura de flujo falló: {e}\n{traceback.format_exc()[-1500:]}")
++        finally:
++            _lock.release()
++
++    _thread = threading.Thread(target=_worker, name="tmad-flow-capture", daemon=True)
++    _thread.start()
++    _log(f"captura de flujo lanzada en segundo plano | slot={slot} | pendiente={','.join(pending)}")
++    return True
+diff --git a/01_PROGRAMAS/data_bot/main.py b/01_PROGRAMAS/data_bot/main.py
+index 78ce62d..e4ea740 100644
+--- a/01_PROGRAMAS/data_bot/main.py
++++ b/01_PROGRAMAS/data_bot/main.py
+@@ -61,6 +61,7 @@ from reporting_v621 import (
+ from scheduler import due_jobs
+ from selection import compute_scanner_changes, select_hourly_enrichment
+ from time_utils import now_madrid, ts_utc_str, ts_madrid_str, market_session_date_str, market_date_from_madrid_iso, latest_completed_market_date, MARKET_TZ, is_operational_window, next_operational_start
++from flow_capture import maybe_start_flow_capture, run_flow_capture
+ from tmad_client import make_client, fetch_scanner, fetch_stock_detail, fetch_stock_intraday, fetch_stock_gex, fetch_score_top_longs, fetch_score_backtest, fetch_score_basket_history, fetch_watchlists, fetch_watchlist_dashboard
+ from transforms import summarize_gex_payload, build_scanner_snapshot, distance_to_price_pct
+ from gex_persistence import persist_gex_bundle
+@@ -2019,16 +2020,24 @@ def run_score_capture(session_type: str = 'manual_score', archive_after: bool =
+         top_count=insert_score_top_longs(run_id, payload, ph)
+         cprint(f'   Score top-longs guardado | rows={top_count}')
+ 
+-        url=config.SCORE_BACKTEST_URL; payload, st=fetch_score_backtest(client)
+-        ph=raw_and_discover('score', run_id, 'score_backtest', None, url, st, payload)
+-        bt_counts=insert_score_backtest(run_id, payload, ph)
+-        cprint(f"   Score backtest guardado | equity={bt_counts.get('equity')} | mc={bt_counts.get('mc')}")
++        # Desde nov-2026 TMAD restringe backtest y basket-history a administradores (403). No deben
++        # tumbar la captura: top-longs ya está guardado y el régimen se captura en FLOW_DB.
++        try:
++            url=config.SCORE_BACKTEST_URL; payload, st=fetch_score_backtest(client)
++            ph=raw_and_discover('score', run_id, 'score_backtest', None, url, st, payload)
++            bt_counts=insert_score_backtest(run_id, payload, ph)
++            cprint(f"   Score backtest guardado | equity={bt_counts.get('equity')} | mc={bt_counts.get('mc')}")
++        except httpx.HTTPStatusError as e:
++            cprint(f"   Score backtest no disponible (HTTP {e.response.status_code if e.response is not None else '?'}): se omite")
+ 
+-        url=config.SCORE_BASKET_HISTORY_URL; payload, st=fetch_score_basket_history(client)
+-        ph=raw_and_discover('score', run_id, 'score_basket_history', None, url, st, payload)
+-        bh_counts=insert_score_basket_history(run_id, payload, ph)
+-        basket_days=bh_counts.get('days',0); basket_positions=bh_counts.get('positions',0)
+-        cprint(f'   Score basket-history guardado | days={basket_days} | positions={basket_positions}')
++        try:
++            url=config.SCORE_BASKET_HISTORY_URL; payload, st=fetch_score_basket_history(client)
++            ph=raw_and_discover('score', run_id, 'score_basket_history', None, url, st, payload)
++            bh_counts=insert_score_basket_history(run_id, payload, ph)
++            basket_days=bh_counts.get('days',0); basket_positions=bh_counts.get('positions',0)
++            cprint(f'   Score basket-history guardado | days={basket_days} | positions={basket_positions}')
++        except httpx.HTTPStatusError as e:
++            cprint(f"   Score basket-history no disponible (HTTP {e.response.status_code if e.response is not None else '?'}): se omite")
+ 
+         update_score_run(run_id, 'success', top_count, basket_days, basket_positions)
+         msg=f"✅ TMAD SCORE capture `{session_type}` finalizado | run_id={run_id} | top_longs={top_count} | basket_days={basket_days} | basket_positions={basket_positions}"
+@@ -3121,6 +3130,22 @@ def _scanner_run_completion(run_id: int) -> dict:
+                 pass
+ 
+ 
++def _flow_capture_finished(result: dict):
++    hm = result.get('option_heatmap') or {}
++    ib = result.get('intraday_bars_1m') or {}
++    rg = result.get('score_regime') or {}
++    msg = (f"🧭 TMAD FLOW capture | slot={result.get('slot')} | tickers={result.get('tickers')} | "
++           f"heatmap={hm.get('status','-')} rows={hm.get('rows',0)} {hm.get('mb',0)}MB failed={hm.get('failed',0)} | "
++           f"velas1m={ib.get('status','-')} rows={ib.get('rows',0)} {ib.get('mb',0)}MB | regime={rg.get('status','-')}")
++    cprint(msg)
++    try:
++        write_output_json('latest_flow_run.json', {**result, 'finished_at_madrid': ts_madrid_str()})
++        if config.SEND_RUN_SUMMARY:
++            log_info(msg)
++    except Exception:
++        pass
++
++
+ def run_daemon():
+     # Acquire the liveness lock before schemas and maintenance. A large persistent
+     # database may need more than the deploy timeout, but the process is already
+@@ -3310,6 +3335,11 @@ def run_daemon():
+                 time.sleep(config.LOOP_SLEEP_SECONDS)
+                 continue
+ 
++            # Flujo de opciones / régimen Score / velas 1 min: hilo propio, no bloquea Scanner ni GEX.
++            try:
++                maybe_start_flow_capture(on_finish=_flow_capture_finished)
++            except Exception as exc:
++                cprint(f'⚠️ Captura de flujo no lanzada: {exc}')
+             for job_type, hhmm, session_type in due_jobs(already_run):
+                 key = f'{now.strftime("%Y-%m-%d")}|{job_type}|{hhmm}'
+                 retry_not_before = float(deep_retry_not_before.get(key) or 0.0)
+@@ -3398,7 +3428,7 @@ def run_daemon():
+ 
+ def main():
+     parser = argparse.ArgumentParser()
+-    parser.add_argument('--once', choices=['scanner','gex','score','watchlist'], help='Ejecuta una captura manual y termina')
++    parser.add_argument('--once', choices=['scanner','gex','score','watchlist','flow'], help='Ejecuta una captura manual y termina')
+     parser.add_argument('--session', default='manual')
+     parser.add_argument('--profile', choices=['auto','selective','deep'], default='auto', help='Perfil de enriquecimiento para --once scanner')
+     args = parser.parse_args()
+@@ -3407,6 +3437,7 @@ def main():
+     elif args.once == 'gex': run_gex_capture(args.session)
+     elif args.once == 'score': run_score_capture(args.session)
+     elif args.once == 'watchlist': run_watchlist_capture(args.session)
++    elif args.once == 'flow': ensure_all_schemas(); print(json.dumps(run_flow_capture(f"manual|{ts_madrid_str()}"), ensure_ascii=False))
+     else: run_daemon()
+ 
+ 
+diff --git a/01_PROGRAMAS/validation_support/validar_flow_capture.py b/01_PROGRAMAS/validation_support/validar_flow_capture.py
+new file mode 100644
+index 0000000..d0a932d
+--- /dev/null
++++ b/01_PROGRAMAS/validation_support/validar_flow_capture.py
+@@ -0,0 +1,86 @@
++"""Validación de flow_capture: heatmap de opciones, régimen Score, velas 1 min, archivo semanal y retención."""
++import os,sys,json,tempfile,random,types,sqlite3,zlib
++from pathlib import Path
++root=tempfile.mkdtemp(prefix="tmadflow_")
++for k,v in {"TMAD_INSTALL_ROOT":root,"TMAD_CONFIG_DIR":root+"/02_CONFIG","TMAD_DATA_DIR":root+"/03_DATOS","TMAD_RUNTIME_DIR":root+"/04_RUNTIME","FLOW_HTTP_SLEEP_SECONDS":"0","SEND_RUN_SUMMARY":"0"}.items(): os.environ[k]=v
++os.makedirs(root+"/02_CONFIG",exist_ok=True)
++hx=types.ModuleType("httpx")
++class HTTPStatusError(Exception):
++    def __init__(s,msg,request=None,response=None): super().__init__(msg); s.response=response
++class Client:
++    def __init__(s,*a,**k): pass
++    def close(s): pass
++hx.HTTPStatusError=HTTPStatusError; hx.Client=Client
++try:
++    import httpx as _real_httpx  # noqa: F401
++    hx=_real_httpx
++except ImportError:
++    sys.modules["httpx"]=hx
++sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"data_bot"))
++import config, db_core, tmad_client, flow_capture as F, archive_manager
++db_core.ensure_all_schemas()
++c=db_core.connect(config.SCANNER_DB)
++info=list(c.execute("pragma table_info(scanner_runs)"))
++vals={r[1]:("x" if r[2]=="TEXT" else 0) for r in info if r[3] and not r[5]}
++vals.update(status="success")
++c.execute(f"insert into scanner_runs({','.join(vals)}) values ({','.join('?'*len(vals))})",list(vals.values()))
++rid=c.execute("select max(id) from scanner_runs").fetchone()[0]
++info=list(c.execute("pragma table_info(scanner_snapshots)"))
++for t in ["NVDA","AAPL","XLV","FAIL"]:
++    v={r[1]:("x" if r[2]=="TEXT" else 0) for r in info if r[3] and not r[5]}; v.update(scanner_run_id=rid,ticker=t)
++    c.execute(f"insert into scanner_snapshots({','.join(v)}) values ({','.join('?'*len(v))})",list(v.values()))
++c.commit(); c.close()
++print("universe",F.universe_tickers())
++bars=[]
++for day in ("2026-11-06","2026-11-09","2026-11-10"):
++    for m in range(0,960,1):
++        hh,mm=4+m//60,m%60
++        bars.append({"timestamp":f"{day} {hh:02d}:{mm:02d}:00","open":170.0,"high":170.5,"low":169.5,"close":170.1,"volume":1000})
++nv={"success":True,"data":{"symbol":"NVDA","intradayBars":bars}}
++def heat(t,side):
++    random.seed(hash((t,side))%1000)
++    spot=170.0
++    cs=[{"dte":d,"gex":random.random(),"otm":(s>spot) if side=="call" else (s<spot),"gamma":0.01,"strike":s,"volume":random.randint(0,500),
++         "gexShare":0,"oiChange":random.randint(-300,300),"gexChange":random.random()-0.5,"contractId":"X","expiration":"2026-12-18",
++         "openInterest":random.randint(0,5000),"gammaFallback":False,"impliedVolatility":0.4} for d in (1,8,30,60,120,400) for s in range(80,300,5)]
++    return {"symbol":t,"side":side,"mode":"daily","snapshot":{"spot":spot,"contracts":cs,"sessionDate":"2026-11-10","previousSessionDate":"2026-11-09","capturedAt":"2026-11-10T23:11:32Z","gexComplete":True,"totalOtmGex":1.0}}
++regime={"success":True,"data":{"windows":{"5":{"current":{"date":"2026-11-10","count":30,"wins":11,"winRate":0.367,"shortWinRate":0.4,"avgReturn":-0.008,"spyReturn":-0.0044,"alpha":-0.0036},"history":[{"date":"2026-11-07","count":30,"wins":12,"winRate":0.4,"shortWinRate":0.4,"avgReturn":-0.005,"spyReturn":0.0,"alpha":-0.005}]},"10":{"current":{"date":"2026-11-10","count":30,"wins":9,"winRate":0.3,"shortWinRate":0.3,"avgReturn":-0.01,"spyReturn":-0.004,"alpha":-0.006},"history":[]}}}}
++calls=[]
++def fake(client,url,params=None,retries=None):
++    calls.append(url)
++    if "FAIL" in url: raise RuntimeError("404 simulado")
++    if "option-heatmap" in url:
++        t=url.split("/stock/")[1].split("/")[0]; side=url.split("side=")[1]; return heat(t,side),200
++    if "regime" in url: return regime,200
++    if "/intraday" in url: return nv,200
++    raise RuntimeError(url)
++tmad_client.fetch_json_with_retries=fake
++tmad_client.make_client=lambda: Client()
++r=F.run_flow_capture("2026-11-11|12:10", include_intraday=True)
++print(json.dumps(r))
++assert r["option_heatmap"]["rows"]==6 and r["intraday_bars_1m"]["rows"]==3 and r["score_regime"]["rows"]==3
++r2=F.run_flow_capture("2026-11-11|12:10", include_intraday=True)
++assert set(r2)=={"slot","tickers"}
++print("second run (should skip):",json.dumps(r2), "calls",len(calls))
++f=db_core.connect(config.FLOW_DB)
++print(f.execute("select kind,status,tickers_ok,tickers_failed,rows_written,bytes_written from flow_runs").fetchall())
++row=f.execute("select ticker,side,session_date,contracts_total,contracts_kept,oi_change_otm,top_oi_change_strike,length(contracts_blob),contracts_blob from option_heatmap_snapshots where ticker='NVDA' and side='call'").fetchone()
++print(row[:8]); cols=F.unpack(row[8]); print({k:len(v) for k,v in cols.items()}, max(cols['dte']))
++b=f.execute("select ticker,first_ts,last_ts,bars,sessions,length(bars_blob),bars_blob from intraday_bars_1m where ticker='NVDA'").fetchone()
++print(b[:6]); bc=F.unpack(b[6]); print(len(bc['ts']), bc['ts'][0], bc['ts'][-1], bc['close'][-1]); assert max(cols['dte'])<=90
++print(f.execute("select ticker,last_ts from intraday_bars_cursor").fetchall())
++print(f.execute("select window_days,count(*) from score_regime_daily group by 1").fetchall())
++f.close()
++# incremental: re-run intraday on a new slot -> no new bars
++r3=F.capture_intraday_bars(Client(),["NVDA"],"2026-11-12|12:10"); print("incremental",r3); assert r3["rows"]==0
++# archive
++wk=archive_manager.iso_week_key(); p=archive_manager.archive_week(wk, finalize=False)
++print("archive dir",p, sorted(x.name for x in Path(p).iterdir()))
++a=sqlite3.connect(Path(p)/f"flow_{wk}.sqlite")
++cnt={t:a.execute(f"select count(*) from {t}").fetchone()[0] for t in ("flow_runs","option_heatmap_snapshots","score_regime_daily","intraday_bars_1m")}; print(cnt); assert cnt["option_heatmap_snapshots"]==6 and cnt["intraday_bars_1m"]==3
++db_core.purge_live_retention(); print("purge ok")
++# slot logic
++from datetime import datetime
++from time_utils import MADRID_TZ
++assert F._due_slot(datetime(2026,11,11,11,0,tzinfo=MADRID_TZ)) is None and F._due_slot(datetime(2026,11,11,15,0,tzinfo=MADRID_TZ))=="2026-11-11|12:10"
++print("VALIDAR_FLOW_CAPTURE_OK")
+-- 
+2.43.0
+

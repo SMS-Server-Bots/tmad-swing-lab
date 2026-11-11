@@ -41,3 +41,26 @@ Consecuencias: en cada ciclo el bot carga, serializa y reescribe filas de unos 9
    ```
 3. Al siguiente reinicio del bot de Alerts el WAL se trunca y se recuperan los ~5 GB. Las páginas liberadas dentro de la base (~2,6 GB) las reutiliza SQLite. Para encoger el fichero haría falta un `VACUUM` con el bot parado; es opcional.
 4. Volver a ejecutar `INSTALAR_BACKUP_ALERTS_STREAM.ps1` después del despliegue, porque el instalador del backup original reactiva la tarea mutable antigua.
+
+## data_bot_flow_capture.patch (11/11/2026)
+
+Hace que el Data Bot guarde en el VPS lo que tmad.app publica sin histórico. Va a una base nueva,
+`03_DATOS\data_bot\db\live\tmad_flow_live.db`, que entra en el ZIP semanal como `flow_<semana>.sqlite`, así que
+sube al sistema de datos por el camino de siempre.
+
+- **Mapas de calor de opciones**, todo el universo, cada día a las 12:10 (Madrid): cambio de OI, volumen, IV y
+  cambio de GEX por contrato. ~10 MB/día.
+- **Régimen del Score**, el mismo endpoint que alimenta el cuadro «Current Regime».
+- **Velas de 1 minuto** con pre/post-market, los lunes y de forma incremental. ~250 MB la primera vez y luego
+  ~50 MB/semana.
+- **Arreglo del Score:** backtest y basket-history ahora dan 403 y ya no tumban la captura, así que el top-10
+  vuelve a guardarse.
+
+Corre en un hilo aparte y no retrasa el Scanner ni el GEX. Se ha comprobado que el parche aplica limpio sobre
+`main` (v6.2.67) y que pasa `validation_support/validar_flow_capture.py`.
+
+Aplicar en tmad-dual-bot:
+```
+git am C:\Users\Administrator\Desktop\tmad-swing-lab\patches\data_bot_flow_capture.patch
+```
+Prueba manual en el VPS, tras desplegar: `python main.py --once flow`.
