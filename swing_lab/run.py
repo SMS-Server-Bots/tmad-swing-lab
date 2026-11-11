@@ -25,6 +25,7 @@ from . import data as D
 from . import policy as P
 from .features import add_features, universe
 from . import movers_gap as MG
+from . import move_trend as MT
 
 LEDGER = "ledger"
 OUT = "out"
@@ -43,7 +44,20 @@ def _load(args):
     intra = D.load_intraday(intraday, live)
     px = D.daily_prices(eod, intra)
     feats = add_features(eod, px[["ticker", "date", "i_hi", "i_lo"]])
-    return feats, px
+    return feats, px, intra
+
+
+MT_SIGNALS = os.path.join(LEDGER, "move_trend_signals.csv")
+
+
+def move_trend_track(px, intra):
+    if not os.path.exists(MT_SIGNALS):
+        return pd.DataFrame()
+    sig = pd.read_csv(MT_SIGNALS)
+    cal = D.sessions(sig.signal_date.min(), max(px.date.max(), sig.signal_date.max()))
+    t = MT.simulate(sig, px, intra, cal)
+    t.to_csv(os.path.join(LEDGER, "move_trend_trades.csv"), index=False)
+    return t
 
 
 def make_picks(feats: pd.DataFrame, date: str, mode: str) -> pd.DataFrame:
@@ -179,7 +193,8 @@ def main():
     a = ap.parse_args()
     if a.cmd == "fetch":
         D.fetch_archives(a.archives); return
-    feats, px = _load(a)
+    feats, px, intra = _load(a)
+    os.makedirs(LEDGER, exist_ok=True)
     os.makedirs(OUT, exist_ok=True)
     if a.cmd in ("list", "backfill"):
         dates = sorted(feats.trade_date.unique())
@@ -188,8 +203,13 @@ def main():
             mode = "PROSPECTIVE" if a.cmd == "list" and d == dates[-1] and px.date.max() <= d else "HISTORICAL"
             p = make_picks(feats, d, mode)
             n = append_ledger(p)
+            orders, ctx = MT.signals(feats, px, d, universe(feats))
+            n_mt = MT.append_signals(MT_SIGNALS, orders, mode)
             if a.cmd == "list":
-                md = list_markdown(p, d) + "\n\n" + MG.movers_markdown(MG.movers_list(feats, d), d)
+                trk = move_trend_track(px, intra)
+                md = (MT.markdown(orders, ctx, trk, d) + "\n\n" + list_markdown(p, d) + "\n\n"
+                      + MG.movers_markdown(MG.movers_list(feats, d), d))
+                print(f"{d}: {MT.POLICY} {n_mt} órdenes nuevas ({mode}) | {ctx}")
                 open(os.path.join(OUT, f"eod_list_{d}.md"), "w", encoding="utf-8").write(md)
                 print(f"{d}: {n} selecciones nuevas ({mode}) -> {OUT}/eod_list_{d}.md")
         if a.cmd == "backfill":
@@ -203,7 +223,8 @@ def main():
         last = gt[gt.date == gt.date.max()] if len(gt) else gt
         mt = MG.movers_tracking(feats, px)
         mt.to_csv(os.path.join(LEDGER, "movers_tracking.csv"), index=False)
-        sb = scoreboard(pos, universe_returns(feats, px)) + "\n\n" + MG.gap_scoreboard(gt) + "\n\n" + MG.movers_scoreboard(mt)
+        sb = (MT.scoreboard(move_trend_track(px, intra)) + "\n\n" + scoreboard(pos, universe_returns(feats, px)) + "\n\n"
+              + MG.gap_scoreboard(gt) + "\n\n" + MG.movers_scoreboard(mt))
         if len(last):
             sb += f"\n\nÚltima sesión con señal de hueco ({last.date.iloc[0]}): " + ", ".join(f"{t} (hueco {g*100:+.1f} %, {z:.1f} vol., resultado {rr*100:+.2f} %)" for t, g, z, rr in zip(last.ticker, last.gap, last.gap_z, last.ret_net))
         open(os.path.join(OUT, "scoreboard.md"), "w", encoding="utf-8").write(sb)
