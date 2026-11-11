@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import os
+import sys
 
 import numpy as np
 import pandas as pd
@@ -184,6 +185,12 @@ def list_markdown(p: pd.DataFrame, date: str) -> str:
 
 
 def main():
+    # La consola de Windows (cp1252) no imprime ≥, —, etc.: sin esto, print() rompe la ejecución.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["fetch", "list", "track", "backfill"])
     ap.add_argument("--archives", default="data")
@@ -210,7 +217,7 @@ def main():
                 md = (MT.markdown(orders, ctx, trk, d) + "\n\n" + list_markdown(p, d) + "\n\n"
                       + MG.movers_markdown(MG.movers_list(feats, d), d))
                 print(f"{d}: {MT.POLICY} {n_mt} órdenes nuevas ({mode}) | {ctx}")
-                open(os.path.join(OUT, f"eod_list_{d}.md"), "w", encoding="utf-8").write(md)
+                open(os.path.join(OUT, f"eod_list_{d}.md"), "w", encoding="utf-8-sig").write(md)
                 print(f"{d}: {n} selecciones nuevas ({mode}) -> {OUT}/eod_list_{d}.md")
         if a.cmd == "backfill":
             print(f"backfill {len(todo)} sesiones")
@@ -227,7 +234,7 @@ def main():
               + MG.gap_scoreboard(gt) + "\n\n" + MG.movers_scoreboard(mt))
         if len(last):
             sb += f"\n\nÚltima sesión con señal de hueco ({last.date.iloc[0]}): " + ", ".join(f"{t} (hueco {g*100:+.1f} %, {z:.1f} vol., resultado {rr*100:+.2f} %)" for t, g, z, rr in zip(last.ticker, last.gap, last.gap_z, last.ret_net))
-        open(os.path.join(OUT, "scoreboard.md"), "w", encoding="utf-8").write(sb)
+        open(os.path.join(OUT, "scoreboard.md"), "w", encoding="utf-8-sig").write(sb)
         print(sb)
 
 

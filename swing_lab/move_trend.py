@@ -49,13 +49,19 @@ def signals(feats: pd.DataFrame, px: pd.DataFrame, date: str, universe_mask: pd.
     if date not in cl.index:
         return pd.DataFrame(), {"error": f"sin precios para {date}"}
     atr = ((hi - lo) / cl * 100).rolling(ATR_N, min_periods=max(5, ATR_N // 2)).mean()
-    spy = cl.get("SPY")
-    if spy is None:
-        return pd.DataFrame(), {"error": "sin SPY"}
-    sma = spy.rolling(SMA_N, min_periods=SMA_N).mean()
-    if pd.isna(sma.get(date)):
-        return pd.DataFrame(), {"error": "SPY sin 20 sesiones de historia"}
-    up = bool(spy[date] > sma[date])
+    # Régimen con los cierres EOD (histórico completo de los archivos semanales), no con los precios intradía.
+    spy = (feats[(feats.ticker == "SPY") & feats.current_price.notna()]
+           .drop_duplicates("trade_date", keep="last").set_index("trade_date").current_price.sort_index())
+    spy = spy[spy.index <= date]
+    if len(spy) < SMA_N:
+        return pd.DataFrame(), {"error": f"SPY con {len(spy)} cierres EOD (< {SMA_N})"}
+    if spy.index[-1] != date:
+        return pd.DataFrame(), {"error": f"sin cierre de SPY el {date}"}
+    sma = spy.rolling(SMA_N).mean()
+    hist = int(atr.loc[date].notna().sum())
+    if hist < 100:
+        return pd.DataFrame(), {"error": f"ATR disponible solo para {hist} tickers (pocas sesiones intradía: {len(cl.index)})"}
+    up = bool(spy.iloc[-1] > sma.iloc[-1])
     day = feats[(feats.trade_date == date) & universe_mask].copy()
     day["atr"] = day.ticker.map(atr.loc[date])
     day["hi"] = day.ticker.map(hi.loc[date]); day["lo"] = day.ticker.map(lo.loc[date])
@@ -72,7 +78,7 @@ def signals(feats: pd.DataFrame, px: pd.DataFrame, date: str, universe_mask: pd.
     sel["in_list"] = np.arange(len(sel)) < LIST_N
     out = sel[["ticker", "side", "trigger", "stop0", "atr", "current_price", "in_list"]].rename(columns={"current_price": "signal_close"})
     out.insert(0, "signal_date", date); out.insert(1, "policy", POLICY)
-    ctx = {"spy": float(spy[date]), "sma20": float(sma[date]), "up": up, "cut_atr": float(cut), "n": int(len(sel))}
+    ctx = {"spy": float(spy.iloc[-1]), "sma20": float(sma.iloc[-1]), "up": up, "cut_atr": float(cut), "n": int(len(sel))}
     return out.reset_index(drop=True), ctx
 
 

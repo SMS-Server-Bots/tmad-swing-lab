@@ -13,6 +13,7 @@ Start-Transcript -Path (Join-Path $logDir ("swing_lab_{0}.log" -f (Get-Date -For
 Push-Location $WorkDir
 try {
     $env:PYTHONPATH = $RepoRoot
+    $env:PYTHONIOENCODING = "utf-8"
     $ErrorActionPreference = "Continue"
     & $Python -m swing_lab.run list --data-root $DataRoot 2>&1 | ForEach-Object { "$_" }
     $listExit = $LASTEXITCODE
