@@ -1,0 +1,43 @@
+{
+ "version": "MOVERS_V2",
+ "target": "toca +5% o -5% (máximo/mínimo) en las 5 sesiones siguientes, entrada apertura siguiente",
+ "features": [
+  "log_vol10",
+  "log_rvol",
+  "log_wall_range",
+  "abs_chg",
+  "gex_neg",
+  "log_abs_gex"
+ ],
+ "mean": {
+  "log_vol10": 1.033964,
+  "log_rvol": 0.606529,
+  "log_wall_range": 1.841646,
+  "abs_chg": 2.444759,
+  "gex_neg": 0.186005,
+  "log_abs_gex": 6.0382
+ },
+ "std": {
+  "log_vol10": 0.699091,
+  "log_rvol": 0.278446,
+  "log_wall_range": 1.247731,
+  "abs_chg": 2.967297,
+  "gex_neg": 0.389115,
+  "log_abs_gex": 2.192098
+ },
+ "coef": {
+  "log_vol10": 1.161812,
+  "log_rvol": 0.018803,
+  "log_wall_range": 0.095254,
+  "abs_chg": 0.145011,
+  "gex_neg": -0.054131,
+  "log_abs_gex": -0.002557
+ },
+ "intercept": 0.353925,
+ "fit_dates": [
+  "2026-08-03",
+  "2026-10-29"
+ ],
+ "oos_auc": 0.773,
+ "note": "Solo tamaño, no dirección. Etiquetas con máx/mín de las capturas del Scanner (subestima toques); revalidar con velas 1 min."
+}

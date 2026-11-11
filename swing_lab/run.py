@@ -201,7 +201,9 @@ def main():
         gt = MG.gap_trades(feats, px)
         os.makedirs(LEDGER, exist_ok=True); gt.to_csv(os.path.join(LEDGER, "gap_trades.csv"), index=False)
         last = gt[gt.date == gt.date.max()] if len(gt) else gt
-        sb = scoreboard(pos, universe_returns(feats, px)) + "\n\n" + MG.gap_scoreboard(gt)
+        mt = MG.movers_tracking(feats, px)
+        mt.to_csv(os.path.join(LEDGER, "movers_tracking.csv"), index=False)
+        sb = scoreboard(pos, universe_returns(feats, px)) + "\n\n" + MG.gap_scoreboard(gt) + "\n\n" + MG.movers_scoreboard(mt)
         if len(last):
             sb += f"\n\nÚltima sesión con señal de hueco ({last.date.iloc[0]}): " + ", ".join(f"{t} (hueco {g*100:+.1f} %, {z:.1f} vol., resultado {rr*100:+.2f} %)" for t, g, z, rr in zip(last.ticker, last.gap, last.gap_z, last.ret_net))
         open(os.path.join(OUT, "scoreboard.md"), "w", encoding="utf-8").write(sb)
