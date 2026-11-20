@@ -8,11 +8,11 @@ param(
     [switch]$RunNow
 )
 $ErrorActionPreference = "Continue"
-& $Python -c "import pandas, numpy; print('pandas', pandas.__version__, 'numpy', numpy.__version__)" 2>&1 | ForEach-Object { "$_" }
+& $Python -c "import pandas, numpy, sklearn; print('pandas', pandas.__version__, 'numpy', numpy.__version__, 'sklearn', sklearn.__version__)" 2>&1 | ForEach-Object { "$_" }
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Instalando pandas y numpy..."
-    & $Python -m pip install --quiet pandas numpy 2>&1 | ForEach-Object { "$_" }
-    & $Python -c "import pandas, numpy" 2>&1 | Out-Null
+    & $Python -m pip install --quiet pandas numpy scikit-learn 2>&1 | ForEach-Object { "$_" }
+    & $Python -c "import pandas, numpy, sklearn" 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "No se pudieron instalar pandas/numpy" }
 }
 $ErrorActionPreference = "Stop"
