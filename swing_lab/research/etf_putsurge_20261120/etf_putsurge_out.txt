@@ -1,0 +1,26 @@
+Sesiones: 81 2026-06-01 → 2026-11-13 | ETF: 161
+
+=== ETF principales (SPY, QQQ, IWM, DIA) ===
+                           grupo   n  1d %  1d baja %  2d %  2d baja %  3d %  3d baja %  5d %  5d baja %
+PUT SURGE + CORE ↑ (continuista)   3 -0.21       67.0 -0.66      100.0 -1.47      100.0 -2.97      100.0
+ PUT SURGE (cualquier tendencia)  33 -0.23       48.0  0.17       44.0 -0.14       47.0 -0.22       50.0
+CORE ↑ continuista sin PUT SURGE  75 -0.13       67.0 -0.25       68.0 -0.34       64.0 -0.20       61.0
+                  Todos los días 324 -0.03       50.0 -0.05       54.0 -0.07       55.0 -0.13       55.0
+
+Eventos en los ETF principales:
+trade_date ticker otm_put_volume_z momentum_score prev5    r1    r3
+2026-08-07    DIA           2.6625           14.7   3.0 -0.15 -0.44
+2026-10-08    QQQ           3.8297            2.8   1.0  0.23 -0.87
+2026-10-09    QQQ           3.8297            2.8   0.3 -0.72  -3.1
+
+=== Todos los ETF (161) ===
+                           grupo     n  1d %  1d baja %  2d %  2d baja %  3d %  3d baja %  5d %  5d baja %
+PUT SURGE + CORE ↑ (continuista)    72 -0.23       54.0 -0.27       61.0 -0.33       63.0 -1.50       62.0
+ PUT SURGE (cualquier tendencia)   917 -0.32       52.0 -0.26       54.0 -0.51       53.0 -0.86       54.0
+CORE ↑ continuista sin PUT SURGE  1102 -0.12       54.0 -0.23       54.0 -0.39       51.0 -0.52       51.0
+                  Todos los días 10034 -0.14       50.0 -0.30       53.0 -0.42       54.0 -0.57       54.0
+
+Todos los ETF, PUT SURGE+↑ menos ↑ sin surge el mismo día, 1 sesión: -0.04 % (t -0.11, 43 días)
+Todos los ETF, PUT SURGE+↑ menos ↑ sin surge el mismo día, 1 sesión: -0.04 % (t -0.11, 43 días)
+Todos los ETF, diferencia por día a 3 sesiones: -0.12 % (t -0.28, 43 días); eventos por mes: {'2026-06': 2, '2026-07': 4, '2026-08': 20, '2026-09': 20, '2026-10': 23, '2026-11': 3}
+Todos los ETF, diferencia por día a 5 sesiones: -0.68 % (t -1.16, 41 días); eventos por mes: {'2026-06': 2, '2026-07': 4, '2026-08': 20, '2026-09': 20, '2026-10': 23, '2026-11': 3}
