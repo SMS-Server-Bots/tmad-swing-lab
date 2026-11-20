@@ -33,6 +33,8 @@ def _seed(date: str) -> int:
 
 def make_lists(s: pd.DataFrame, L: pd.DataFrame, date: str, mode: str) -> tuple[pd.DataFrame, dict]:
     D = s[T.universe(s)].merge(L, on=["ticker", "trade_date"], how="left")
+    if not (D.trade_date == date).any():
+        raise SystemExit(f"TOP10: no hay datos del Scanner para {date} (última sesión: {D.trade_date.max()})")
     si = D.loc[D.trade_date == date, "si"].iloc[0]
     train = D[(D.si + LB.HORIZON + 1 < si) & D.long_res.notna()]
     cols = [c for c in feature_columns(s) if s[c].notna().mean() > 0.05]
