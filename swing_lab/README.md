@@ -31,6 +31,18 @@ powershell -ExecutionPolicy Bypass -File .\INSTALAR_SWING_LAB_VPS.ps1 -RunNow
 ```
 Cada día laborable, a las 14:30 hora del VPS (23:30 en Madrid), deja `swing_lab_runtime\ULTIMA_LISTA.md` y `swing_lab_runtime\MARCADOR.md`.
 
+## Sistema TOP10 (desde el 20/11/2026)
+
+`python -m swing_lab.run top10 --data-root ...` (incluido en la tarea nocturna):
+1. **Almacén** (`store.py`): una fila por ticker y sesión con todo el Scanner (foto canónica de cierre) y 114 variables
+   derivadas: precio y volatilidad, cambios de CORE, z de opciones y GEX Activity, GEX y muros, zonas, ETF principales,
+   amplitud y percentiles del día.
+2. **Etiquetas** (`labels.py`): objetivo 1,5·ATR antes que stop 1·ATR en 5 sesiones, en largo y en corto.
+3. **Modelo** (`top10.py`): probabilidades calibradas de objetivo y de stop por lado → valor esperado en R.
+4. **Listas congeladas** de TOP10_GBM_V1, MAG_SIDE_V1, SHORT_HIGHVOL_V1 y RANDOM10 → `ledger/top10_picks.csv`;
+   seguimiento → `ledger/top10_positions.csv`; marcador → `out/top10_scoreboard.md`.
+Backtest y decisiones: `research/top10_20261120/RESULTADO.md`.
+
 ## Qué produce cada día
 
 - **Políticas en papel** (`PAPER_V1_REV`, `C5050`, `RANDOM`): Top-5 LONG y SHORT con seguimiento y salida.

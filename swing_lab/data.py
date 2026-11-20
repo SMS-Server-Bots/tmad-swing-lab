@@ -90,13 +90,33 @@ def _read_sqlite_from_zip(zpath: str, prefix: str, query: str) -> pd.DataFrame:
             con.close()
 
 
+# Foto canónica de cierre: el último run profundo con éxito de cada día (misma regla que
+# rebuild_canonical_daily_history del Data Bot). Hasta la 6.2.74, ticker_daily_history perdía los muros del GEX
+# en los días sin reinicio; las fotos los conservan.
+CANON_Q = """select s.*, s.snapshot_date as trade_date, s.captured_at_utc as updated_at_utc
+             from scanner_snapshots s join (
+               select snapshot_date, max(id) as run_id from scanner_runs
+               where status='success' and lower(coalesce(session_type,'')) like '%deep%' group by snapshot_date) k
+             on k.run_id = s.scanner_run_id"""
+
+
+def _eod_part(con_or_zip, is_zip: bool) -> pd.DataFrame:
+    for q in (CANON_Q, "select * from ticker_daily_history"):
+        try:
+            d = _read_sqlite_from_zip(con_or_zip, "scanner_", q) if is_zip else pd.read_sql(q, con_or_zip)
+        except Exception:
+            d = pd.DataFrame()
+        if len(d):
+            return d.loc[:, ~d.columns.duplicated()]
+    return pd.DataFrame()
+
+
 def load_eod(weekly_dir: str, live_db: str | None = None) -> pd.DataFrame:
     """Panel EOD (una fila por ticker y sesión) desde ZIP semanales + base viva opcional."""
-    q = "select * from ticker_daily_history"
-    parts = [_read_sqlite_from_zip(z, "scanner_", q) for z in sorted(glob.glob(os.path.join(weekly_dir, "**", "20??-W*.zip"), recursive=True))]
+    parts = [_eod_part(z, True) for z in sorted(glob.glob(os.path.join(weekly_dir, "**", "20??-W*.zip"), recursive=True))]
     if live_db and os.path.exists(live_db):
         con = sqlite3.connect(f"file:{live_db}?mode=ro", uri=True)
-        parts.append(pd.read_sql(q, con)); con.close()
+        parts.append(_eod_part(con, False)); con.close()
     p = pd.concat([x for x in parts if len(x)], ignore_index=True)
     p = p[~p.trade_date.isin(NYSE_HOLIDAYS_2026)]
     p = p.sort_values("updated_at_utc").drop_duplicates(["ticker", "trade_date"], keep="last")

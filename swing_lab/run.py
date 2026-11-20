@@ -5,6 +5,7 @@ Uso (desde la raíz del repo):
   python -m swing_lab.run list    --archives data/ [--live-db X] [--date YYYY-MM-DD]
   python -m swing_lab.run track   --archives data/ [--live-db X]
   python -m swing_lab.run backfill --archives data/ --start 2026-08-20 --end 2026-10-30
+  python -m swing_lab.run top10   --archives data/ [--date YYYY-MM-DD]   # sistema TOP10: lista, seguimiento, marcador
   En el VPS:  python -m swing_lab.run list --data-root C:\...\03_DATOS   (lee ZIP + base viva en solo lectura)
 
 ``list`` añade al registro ``ledger/picks.csv`` las selecciones de cada política (modo PROSPECTIVE si se
@@ -27,6 +28,7 @@ from . import policy as P
 from .features import add_features, universe
 from . import movers_gap as MG
 from . import move_trend as MT
+from . import top10_run as T10
 
 LEDGER = "ledger"
 OUT = "out"
@@ -192,7 +194,7 @@ def main():
         except Exception:
             pass
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["fetch", "list", "track", "backfill"])
+    ap.add_argument("cmd", choices=["fetch", "list", "track", "backfill", "top10"])
     ap.add_argument("--archives", default="data")
     ap.add_argument("--live-db", default=None)
     ap.add_argument("--data-root", default=None, help="Ruta a 03_DATOS en el VPS (lectura)")
@@ -202,6 +204,10 @@ def main():
         D.fetch_archives(a.archives); return
     feats, px, intra = _load(a)
     os.makedirs(LEDGER, exist_ok=True)
+    if a.cmd == "top10":
+        os.makedirs(OUT, exist_ok=True)
+        T10.run(feats, px, OUT, a.date)
+        return
     os.makedirs(OUT, exist_ok=True)
     if a.cmd in ("list", "backfill"):
         dates = sorted(feats.trade_date.unique())

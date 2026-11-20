@@ -19,12 +19,20 @@ try {
     $listExit = $LASTEXITCODE
     & $Python -m swing_lab.run track --data-root $DataRoot 2>&1 | ForEach-Object { "$_" }
     $trackExit = $LASTEXITCODE
+    & $Python -m swing_lab.run top10 --data-root $DataRoot 2>&1 | ForEach-Object { "$_" }
+    $top10Exit = $LASTEXITCODE
     $last = Get-ChildItem (Join-Path $WorkDir "out") -Filter "eod_list_*.md" -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1
-    if ($last) { Copy-Item $last.FullName (Join-Path $WorkDir "ULTIMA_LISTA.md") -Force }
-    $sb = Join-Path $WorkDir "out\scoreboard.md"
-    if (Test-Path $sb) { Copy-Item $sb (Join-Path $WorkDir "MARCADOR.md") -Force }
+    $t10 = Get-ChildItem (Join-Path $WorkDir "out") -Filter "top10_20*.md" -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1
+    $parts = @()
+    if ($t10) { $parts += Get-Content $t10.FullName -Raw -Encoding UTF8 }
+    if ($last) { $parts += Get-Content $last.FullName -Raw -Encoding UTF8 }
+    if ($parts.Count) { ($parts -join "`r`n`r`n---`r`n`r`n") | Set-Content (Join-Path $WorkDir "ULTIMA_LISTA.md") -Encoding UTF8 }
+    $sbParts = @()
+    foreach ($f in @("out\top10_scoreboard.md", "out\scoreboard.md")) { $p = Join-Path $WorkDir $f; if (Test-Path $p) { $sbParts += Get-Content $p -Raw -Encoding UTF8 } }
+    if ($sbParts.Count) { ($sbParts -join "`r`n`r`n---`r`n`r`n") | Set-Content (Join-Path $WorkDir "MARCADOR.md") -Encoding UTF8 }
     Write-Host "SWING_LAB_LIST_EXIT_CODE=$listExit"
     Write-Host "SWING_LAB_TRACK_EXIT_CODE=$trackExit"
+    Write-Host "SWING_LAB_TOP10_EXIT_CODE=$top10Exit"
     Write-Host "SWING_LAB_OUTPUT=$WorkDir"
 } finally {
     Pop-Location
