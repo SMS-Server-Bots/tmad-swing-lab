@@ -17,6 +17,7 @@ import getpass
 import gzip
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -32,6 +33,11 @@ def main() -> None:
     ap.add_argument("--end", default=dt.date.today().isoformat())
     ap.add_argument("--sleep", type=float, default=12.5)
     a = ap.parse_args()
+    for st in (sys.stdout, sys.stderr):        # consola de Windows (cp1252)
+        try:
+            st.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     os.makedirs(a.out, exist_ok=True)
     key = os.environ.get("MASSIVE_API_KEY", "").strip() or getpass.getpass("MASSIVE_API_KEY (no se muestra): ").strip()
     rows, status = [], {}
@@ -52,7 +58,7 @@ def main() -> None:
         for b in res:
             d = dt.datetime.fromtimestamp(b["t"] / 1000, dt.timezone.utc).date().isoformat()
             rows.append([t, d, b.get("o"), b.get("h"), b.get("l"), b.get("c")])
-        status[t] = f"ok {len(res)} días ({res[0]['t'] and dt.datetime.fromtimestamp(res[0]['t']/1000, dt.timezone.utc).date()} → " \
+        status[t] = f"ok {len(res)} días ({res[0]['t'] and dt.datetime.fromtimestamp(res[0]['t']/1000, dt.timezone.utc).date()} -> " \
                     f"{dt.datetime.fromtimestamp(res[-1]['t']/1000, dt.timezone.utc).date()})" if res else "vacío"
         print(f"{t}: {status[t]}", flush=True)
     with gzip.open(os.path.join(a.out, "indices_daily.csv.gz"), "wt", newline="", encoding="utf-8") as f:
