@@ -11,7 +11,7 @@ function Invoke-Gh([string[]]$GhArgs) {
     try { $o = & gh @GhArgs 2>&1 | ForEach-Object { "$_" }; $c = $LASTEXITCODE } finally { $ErrorActionPreference = $prev }
     [pscustomobject]@{ Code = $c; Text = ($o -join " ") }
 }
-$files = Get-ChildItem $Dir -File | Where-Object { $_.Name -like "grouped_daily_*.csv.gz" -or $_.Name -eq "status.json" } | Sort-Object Name
+$files = Get-ChildItem $Dir -File | Where-Object { $_.Name -like "grouped_daily_*.csv.gz" -or $_.Name -eq "status.json" -or $_.Name -like "indices_*" } | Sort-Object Name
 if (-not $files) { throw "No hay ficheros en $Dir" }
 if ((Invoke-Gh @("release", "view", $Tag, "--repo", $Repo)).Code -ne 0) {
     $r = Invoke-Gh @("release", "create", $Tag, "--repo", $Repo, "--title", "Massive grouped daily (privado)", "--notes", "OHLCV diario oficial EE. UU. descargado desde el VPS. Uso interno.")
