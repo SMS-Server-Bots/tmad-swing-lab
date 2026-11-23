@@ -8,7 +8,7 @@ Estrategias en papel (CONGELADAS; un cambio = estrategia nueva con contador desd
   RANDOM10           control: 10 al azar con lado al azar (semilla por fecha).
 Reglas de salida comunes (labels.py): entrada en la apertura siguiente, objetivo 1,5·ATR, stop 1·ATR,
 máximo 5 sesiones, costes 0,2 %. Solo cuentan para promoción las listas PROSPECTIVE (generadas antes de abrir).
-Promoción: ≥ 40 sesiones PROSPECTIVE cerradas, t ≥ 2 y mejor que RANDOM10.
+Promoción: ≥ 40 sesiones PROSPECTIVE cerradas, t ≥ 2 del EXCESO sobre el universo y mejor que RANDOM10.
 """
 from __future__ import annotations
 
@@ -76,17 +76,25 @@ def append(P: pd.DataFrame) -> int:
     return len(P)
 
 
-def track(L: pd.DataFrame) -> pd.DataFrame:
+def track(L: pd.DataFrame, s: pd.DataFrame | None = None) -> pd.DataFrame:
     if not os.path.exists(PICKS):
         return pd.DataFrame()
     pk = pd.read_csv(PICKS)
     m = pk.merge(L, on=["ticker", "trade_date"], how="left")
+    # Referencia del día: R medio de TODO el universo en ese lado. Sin esto, el marcador mide hacia dónde fue el
+    # mercado (semana del 16–20/11: todo corto gana, todo largo pierde), no si la selección acierta.
+    if s is not None:
+        U = s[T.universe(s)][["ticker", "trade_date"]].merge(L, on=["ticker", "trade_date"])
+        ref = U.groupby("trade_date").agg(univ_long_R=("long_R", "mean"), univ_short_R=("short_R", "mean"))
+        m = m.merge(ref, left_on="trade_date", right_index=True, how="left")
     lg = m.side == "LONG"
     m["res"] = np.where(lg, m.long_res, m.short_res)
     m["R"] = np.where(lg, m.long_R, m.short_R)
     m["ret"] = np.where(lg, m.long_ret, m.short_ret)
     m["days"] = np.where(lg, m.long_days, m.short_days)
     m["status"] = np.select([m.res == 1, m.res == 0, m.res == 0.5], ["OBJETIVO", "STOP", "TIEMPO"], "ABIERTA")
+    if "univ_long_R" in m:
+        m["excess_R"] = m.R - np.where(lg, m.univ_long_R, m.univ_short_R)
     m.to_csv(os.path.join("ledger", "top10_positions.csv"), index=False)
     return m
 
@@ -94,18 +102,21 @@ def track(L: pd.DataFrame) -> pd.DataFrame:
 def scoreboard(m: pd.DataFrame) -> str:
     lines = ["## Marcador TOP10 (papel)", "",
              "Salida: objetivo 1,5·ATR, stop 1·ATR, máx. 5 sesiones, costes 0,2 %. R = ganancia en unidades de stop.",
-             f"Promoción: ≥ {PROMO_SESSIONS} sesiones PROSPECTIVE cerradas, t ≥ {PROMO_T} y mejor que RANDOM10.", "",
-             "| Estrategia | Modo | Sesiones cerradas | Operaciones | R medio | t | Objetivo | Stop | Abiertas |",
-             "|---|---|---:|---:|---:|---:|---:|---:|---:|"]
+             f"Promoción: ≥ {PROMO_SESSIONS} sesiones PROSPECTIVE cerradas, t ≥ {PROMO_T} del exceso sobre el universo y mejor que RANDOM10.", "",
+             "Exceso = R menos el R medio de todo el universo en el mismo lado y día: mide la selección, no el mercado.", "",
+             "| Estrategia | Modo | Sesiones con cierres | Operaciones | R medio | Exceso vs universo | t (exceso) | Objetivo | Stop | Abiertas |",
+             "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
     if m.empty:
         return "\n".join(lines + ["", "Sin listas todavía."])
     res = {}
     for (st, mode), g in m.groupby(["strategy", "mode"]):
         c = g[g.status != "ABIERTA"]
         daily = c.groupby("trade_date").R.mean()
-        t = T.nw_t(daily.values, LB.HORIZON) if len(daily) >= 5 else np.nan
-        res[(st, mode)] = (len(daily), daily.mean() if len(daily) else np.nan, t)
+        xs = c.groupby("trade_date").excess_R.mean() if "excess_R" in c else daily * np.nan
+        t = T.nw_t(xs.values, LB.HORIZON) if len(xs.dropna()) >= 5 else np.nan
+        res[(st, mode)] = (len(daily), xs.mean() if len(xs) else np.nan, t)
         lines.append(f"| {st} | {mode} | {len(daily)} | {len(c)} | {daily.mean() if len(daily) else float('nan'):+.3f} | "
+                     f"{xs.mean() if len(xs) else float('nan'):+.3f} | "
                      f"{t:+.2f} | {(c.status == 'OBJETIVO').mean() * 100 if len(c) else float('nan'):.0f} % | "
                      f"{(c.status == 'STOP').mean() * 100 if len(c) else float('nan'):.0f} % | {(g.status == 'ABIERTA').sum()} |")
     rnd = res.get(("RANDOM10", "PROSPECTIVE"), (0, np.nan, np.nan))[1]
@@ -113,7 +124,7 @@ def scoreboard(m: pd.DataFrame) -> str:
     for st in STRATEGIES[:-1]:
         n, r, t = res.get((st, "PROSPECTIVE"), (0, np.nan, np.nan))
         ok = n >= PROMO_SESSIONS and t >= PROMO_T and (np.isnan(rnd) or r > rnd)
-        lines.append(f"- {st}: {n}/{PROMO_SESSIONS} sesiones, R {r:+.3f}, t {t:+.2f} → {'PROMOCIONABLE' if ok else 'en prueba'}")
+        lines.append(f"- {st}: {n}/{PROMO_SESSIONS} sesiones, exceso {r:+.3f} R, t {t:+.2f} → {'PROMOCIONABLE' if ok else 'en prueba'}")
     return "\n".join(lines)
 
 
@@ -141,7 +152,7 @@ def run(eod: pd.DataFrame, px: pd.DataFrame, out_dir: str = "out", date: str | N
     mode = "PROSPECTIVE" if date is None and px.date.max() <= d else "HISTORICAL"
     P, info = make_lists(s, L, d, mode)
     n = append(P)
-    m = track(L)
+    m = track(L, s)
     os.makedirs(out_dir, exist_ok=True)
     md = list_markdown(P, d, info)
     sb = scoreboard(m)
