@@ -30,6 +30,13 @@ try {
     $sbParts = @()
     foreach ($f in @("out\top10_scoreboard.md", "out\scoreboard.md")) { $p = Join-Path $WorkDir $f; if (Test-Path $p) { $sbParts += Get-Content $p -Raw -Encoding UTF8 } }
     if ($sbParts.Count) { ($sbParts -join "`r`n`r`n---`r`n`r`n") | Set-Content (Join-Path $WorkDir "MARCADOR.md") -Encoding UTF8 }
+    # Copia del resultado en GitHub (release privada del laboratorio) para revisarlo sin entrar al VPS.
+    $rel = "swing-lab-runtime"; $repo = "SMS-Server-Bots/tmad-swing-lab"
+    & gh release view $rel --repo $repo *> $null
+    if ($LASTEXITCODE -ne 0) { & gh release create $rel --repo $repo --title "Swing Lab: resultado diario (papel)" --notes "ULTIMA_LISTA, MARCADOR y registros del laboratorio. Se sustituyen cada noche." *> $null }
+    $up = @(Join-Path $WorkDir "ULTIMA_LISTA.md"; Join-Path $WorkDir "MARCADOR.md") + @(Get-ChildItem (Join-Path $WorkDir "ledger") -Filter "*.csv" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+    $up = @($up | Where-Object { Test-Path $_ })
+    if ($up.Count) { & gh release upload $rel @up --repo $repo --clobber 2>&1 | ForEach-Object { "$_" }; Write-Host "SWING_LAB_UPLOAD_EXIT_CODE=$LASTEXITCODE" }
     Write-Host "SWING_LAB_LIST_EXIT_CODE=$listExit"
     Write-Host "SWING_LAB_TRACK_EXIT_CODE=$trackExit"
     Write-Host "SWING_LAB_TOP10_EXIT_CODE=$top10Exit"
