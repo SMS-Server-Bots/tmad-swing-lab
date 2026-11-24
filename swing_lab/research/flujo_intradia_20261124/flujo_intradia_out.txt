@@ -1,0 +1,22 @@
+8 sesiones, 3316 observaciones acción-hora, 125 acciones
+   señal                hasta  IC_medio   t_IC dias_IC_positivo  quintil_alto_menos_bajo_pct  t_spread
+ vol_imb       cierre del día    -0.045 -0.873              3/8                       -0.038    -0.170
+ vol_imb cierre día siguiente    -0.026 -0.324              3/7                        0.045     0.056
+dvol_imb       cierre del día    -0.047 -1.503              3/8                        0.030     0.133
+dvol_imb cierre día siguiente    -0.036 -0.626              4/7                       -0.096    -0.163
+ gex_imb       cierre del día     0.015  0.435              4/8                        0.160     0.871
+ gex_imb cierre día siguiente     0.079  1.631              4/7                        0.749     1.148
+  oi_imb       cierre del día    -0.008 -0.221              4/8                        0.030     0.150
+  oi_imb cierre día siguiente    -0.055 -0.672              3/7                       -0.296    -0.296
+
+ETF principales: correlación (rangos) desequilibrio de volumen vs retorno hasta el cierre: -0.12 (n=146, 8 días)
+              vol_imb_media  r_eod_media
+session_date                            
+2026-11-11           -0.443       -0.001
+2026-11-12           -0.331        0.001
+2026-11-13           -0.153        0.001
+2026-11-16           -0.001       -0.004
+2026-11-17           -0.034        0.000
+2026-11-18           -0.115       -0.001
+2026-11-19            0.244       -0.012
+2026-11-20            0.106       -0.017
